@@ -1,0 +1,68 @@
+# ==========================================
+# Python
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.pyd
+
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+.env
+
+# ==========================================
+# Jupyter Notebook
+# ==========================================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ==========================================
+# Dữ liệu nhạy cảm / kết quả xử lý
+# ==========================================
+data/output/
+data/cleaned/
+data/logs/
+*.log
+
+# Không bỏ qua dữ liệu thô (để cộng tác)
+# data/raw/ -- được giữ nguyên
+
+# File kết quả hợp nhất
+du_lieu_tong_hop.csv
+bao_cao_kiem_dinh.csv
+
+# ==========================================
+# IDE / Editor
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ==========================================
+# Coverage / Testing
+# ==========================================
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# ==========================================
+# Môi trường & Biến bí mật
+# ==========================================
+.env
+.env.local
+secrets.toml
+config_local.py
