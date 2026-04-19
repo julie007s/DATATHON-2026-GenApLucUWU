@@ -1,22 +1,23 @@
 """
 ============================================================
-FILE CHÍNH: pipeline.py  (Main Pipeline Entry Point)
+FILE: pipeline.py  (Main Pipeline Entry Point)
 ============================================================
-Mục đích: Điều phối toàn bộ quá trình kiểm định và hợp nhất dữ liệu.
+Purpose: Orchestrate the full data validation, cleaning,
+         and merging workflow.
 
-CÁCH CHẠY:
+HOW TO RUN:
     python pipeline.py
 
-    Hoặc với tùy chọn:
-    python pipeline.py --thu_muc data/raw --khong_hop_nhat
+    With options:
+    python pipeline.py --data_dir data/raw --validate_only
 
-LUỒNG THỰC THI (Execution Flow):
-    1. Đọc tất cả file CSV từ thư mục data/raw/
-    2. Kiểm định từng file → báo cáo lỗi chi tiết
-    3. In bảng tóm tắt kiểm định
-    4. Lưu báo cáo CSV
-    5. Hợp nhất tất cả bảng theo Star Schema
-    6. Lưu kết quả → data/output/du_lieu_tong_hop.csv
+EXECUTION FLOW:
+    1. Discover CSV files in data/raw/
+    2. Validate each file  → print per-file report
+    3. Print + save validation summary table
+    4. Clean null values   → save cleaned copies to data/interim/
+    5. Merge all tables    → save data/output/master_table.csv
+    6. Print final summary
 ============================================================
 """
 
@@ -24,27 +25,29 @@ import sys
 import io
 import argparse
 
-# Đặt stdout thành UTF-8 để hiển thị đúng ký tự tiếng Việt và emoji trên Windows
-if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+# Set stdout to UTF-8 so emoji and special characters display correctly on Windows
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
 from pathlib import Path
 from colorama import Fore, Style, init
 
-# Thêm thư mục gốc vào sys.path để import các module nội bộ
+# Make sure the project root is on sys.path so internal imports work
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.kiem_dinh import kiem_dinh_nhieu_file
-from src.hop_nhat  import hop_nhat_du_lieu
-from src.bao_cao   import tao_bang_tom_tat, in_bang_tom_tat, luu_bao_cao_csv, in_thong_ke_tong
+from src.validator import validate_files
+from src.reporter  import build_summary_table, print_summary_table, save_report_csv, print_overall_stats
+from src.cleaner   import clean_multiple_files
+from src.merger    import merge_tables
 
 init(autoreset=True)
 
-
-# ──────────────────────────────────────────────────────────────
-# DANH SÁCH FILE CẦN XỬ LÝ (có thể tùy chỉnh)
-# ──────────────────────────────────────────────────────────────
-DANH_SACH_FILE_CSV = [
+# ──────────────────────────────────────────────────────────
+# CSV FILES TO PROCESS
+# Remove or comment-out any file that is not present.
+# ──────────────────────────────────────────────────────────
+CSV_FILES = [
     "customers.csv",
     "geography.csv",
     "products.csv",
@@ -61,120 +64,122 @@ DANH_SACH_FILE_CSV = [
 ]
 
 
-def chay_pipeline(
-    thu_muc_raw: Path,
-    co_hop_nhat: bool = True,
-    chi_kiem_dinh: bool = False,
+def run_pipeline(
+    raw_dir: Path,
+    validate_only: bool = False,
 ) -> None:
     """
-    Hàm điều phối chính của toàn bộ Data Pipeline.
+    Main orchestrator for the data pipeline.
 
-    Tham số:
-        thu_muc_raw   : Đường dẫn đến thư mục chứa file CSV gốc
-        co_hop_nhat   : True → thực hiện bước hợp nhất dữ liệu
-        chi_kiem_dinh : True → chỉ kiểm định, không hợp nhất
+    Args:
+        raw_dir       : Absolute path to the directory containing raw CSV files.
+        validate_only : If True, skip cleaning and merging steps.
     """
-    print(f"\n{Fore.MAGENTA}{'█'*60}")
-    print("  DATA PIPELINE — KIỂM ĐỊNH & HỢP NHẤT DỮ LIỆU")
-    print(f"  📁 Thư mục nguồn: {thu_muc_raw}")
-    print(f"{'█'*60}{Style.RESET_ALL}")
+    print(f"\n{Fore.MAGENTA}{'█' * 60}")
+    print("  DATA PIPELINE — VALIDATE · CLEAN · MERGE")
+    print(f"  📁 Source directory: {raw_dir}")
+    print(f"{'█' * 60}{Style.RESET_ALL}")
 
-    # ── BƯỚC 1: Thu thập danh sách file cần xử lý ────────────
-    danh_sach_duong_dan = []
-    for ten_file in DANH_SACH_FILE_CSV:
-        duong_dan = thu_muc_raw / ten_file
-        if duong_dan.exists():
-            danh_sach_duong_dan.append(duong_dan)
+    # ── STEP 1: Collect existing CSV paths ────────────────────
+    csv_paths: list[Path] = []
+    for name in CSV_FILES:
+        path = raw_dir / name
+        if path.exists():
+            csv_paths.append(path)
         else:
-            print(f"  {Fore.YELLOW}⚠ Không tìm thấy: {ten_file}{Style.RESET_ALL}")
+            print(f"  {Fore.YELLOW}⚠  Not found (skipped): {name}{Style.RESET_ALL}")
 
-    if not danh_sach_duong_dan:
-        print(f"  {Fore.RED}❌ Không tìm thấy file CSV nào trong: {thu_muc_raw}{Style.RESET_ALL}")
+    if not csv_paths:
+        print(f"  {Fore.RED}❌ No CSV files found in: {raw_dir}{Style.RESET_ALL}")
         sys.exit(1)
 
-    print(f"\n  📂 Tìm thấy {len(danh_sach_duong_dan)} file CSV để xử lý.")
+    print(f"\n  📂 Found {len(csv_paths)} CSV file(s) to process.")
 
-    # ── BƯỚC 2: Kiểm định từng file ───────────────────────────
-    print(f"\n{Fore.BLUE}{'═'*60}")
-    print("  GIAI ĐOẠN 1: KIỂM ĐỊNH DỮ LIỆU (Data Validation)")
-    print(f"{'═'*60}{Style.RESET_ALL}")
+    # ── STEP 2: Validate ──────────────────────────────────────
+    print(f"\n{Fore.BLUE}{'═' * 60}")
+    print("  STAGE 1: DATA VALIDATION")
+    print(f"{'═' * 60}{Style.RESET_ALL}")
 
-    danh_sach_bao_cao = kiem_dinh_nhieu_file(
-        danh_sach_duong_dan=danh_sach_duong_dan,
-        in_ra_terminal=True,
-    )
+    reports = validate_files(csv_paths, verbose=True)
 
-    # ── BƯỚC 3: In bảng tóm tắt ──────────────────────────────
-    bang_tom_tat = tao_bang_tom_tat(danh_sach_bao_cao)
-    in_bang_tom_tat(bang_tom_tat)
-    in_thong_ke_tong(danh_sach_bao_cao)
+    # ── STEP 3: Print + save validation summary ───────────────
+    summary = build_summary_table(reports)
+    print_summary_table(summary)
+    print_overall_stats(reports)
 
-    # ── BƯỚC 4: Lưu báo cáo kiểm định ───────────────────────
-    thu_muc_output = thu_muc_raw.parent / "output"
-    duong_dan_bao_cao = luu_bao_cao_csv(bang_tom_tat, thu_muc_output)
-    print(f"\n  {Fore.GREEN}💾 Báo cáo kiểm định → {duong_dan_bao_cao}{Style.RESET_ALL}")
+    output_dir = raw_dir.parent / "output"
+    report_path = save_report_csv(summary, output_dir)
+    print(f"\n  {Fore.GREEN}💾 Validation report → {report_path}{Style.RESET_ALL}")
 
-    # ── BƯỚC 5: Hợp nhất dữ liệu (nếu được yêu cầu) ─────────
-    if chi_kiem_dinh:
-        print(f"\n  {Fore.CYAN}ℹ Bỏ qua bước hợp nhất (--chi_kiem_dinh).{Style.RESET_ALL}")
+    if validate_only:
+        print(f"\n  {Fore.CYAN}ℹ  --validate_only flag set. Skipping clean + merge.{Style.RESET_ALL}")
         return
 
-    print(f"\n{Fore.BLUE}{'═'*60}")
-    print("  GIAI ĐOẠN 2: HỢP NHẤT DỮ LIỆU (Data Merging)")
-    print(f"{'═'*60}{Style.RESET_ALL}")
+    # ── STEP 4: Clean null values ─────────────────────────────
+    print(f"\n{Fore.BLUE}{'═' * 60}")
+    print("  STAGE 2: NULL-VALUE CLEANING")
+    print(f"{'═' * 60}{Style.RESET_ALL}")
 
-    bang_ket_qua = hop_nhat_du_lieu(
-        thu_muc_raw=thu_muc_raw,
-        ten_file_dau_ra="du_lieu_tong_hop.csv",
-        in_ra_terminal=True,
+    interim_dir = raw_dir.parent / "interim"
+    _cleaned_frames, _clean_reports = clean_multiple_files(
+        csv_paths, interim_dir, verbose=True
     )
 
-    # ── BƯỚC 6: In tóm tắt kết quả cuối cùng ─────────────────
-    print(f"\n{Fore.MAGENTA}{'█'*60}")
-    print("  ✅ PIPELINE HOÀN THÀNH!")
-    print(f"  📊 Bảng tổng hợp: {len(bang_ket_qua):,} dòng × {len(bang_ket_qua.columns)} cột")
-    print(f"  📁 Kết quả lưu tại: data/output/du_lieu_tong_hop.csv")
-    print(f"  📋 Báo cáo lưu tại: data/output/bao_cao_kiem_dinh.csv")
-    print(f"{'█'*60}{Style.RESET_ALL}\n")
+    total_cells_filled = sum(r["total_filled"] for r in _clean_reports)
+    print(
+        f"\n  {Fore.GREEN}✅ Cleaning complete — "
+        f"{total_cells_filled:,} null cell(s) filled across all files.{Style.RESET_ALL}"
+    )
+
+    # ── STEP 5: Merge into master table ───────────────────────
+    master = merge_tables(
+        interim_dir=interim_dir,
+        output_dir=output_dir,
+        output_filename="master_table.csv",
+        verbose=True,
+    )
+
+    # ── STEP 6: Final summary ─────────────────────────────────
+    print(f"\n{Fore.MAGENTA}{'█' * 60}")
+    print("  ✅ PIPELINE COMPLETE!")
+    print(f"  📊 Master table : {master.shape[0]:,} rows × {master.shape[1]} columns")
+    print(f"  📁 Saved to     : data/output/master_table.csv")
+    print(f"  📋 Report saved : data/output/validation_report.csv")
+    print(f"{'█' * 60}{Style.RESET_ALL}\n")
 
 
-def _phan_tich_tham_so() -> argparse.Namespace:
-    """Phân tích tham số dòng lệnh (Command-Line Arguments)."""
-    bo_phan_tich = argparse.ArgumentParser(
-        description="Data Pipeline — Kiểm định và Hợp nhất dữ liệu CSV",
+def _parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Data Pipeline — Validate, Clean, and Merge CSV files",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Ví dụ:
+Examples:
   python pipeline.py
-  python pipeline.py --thu_muc data/raw
-  python pipeline.py --chi_kiem_dinh
+  python pipeline.py --data_dir data/raw
+  python pipeline.py --validate_only
         """,
     )
-
-    bo_phan_tich.add_argument(
-        "--thu_muc",
+    parser.add_argument(
+        "--data_dir",
         type=str,
         default="data/raw",
-        help="Đường dẫn đến thư mục chứa file CSV (mặc định: data/raw)",
+        help="Path to the directory containing raw CSV files (default: data/raw)",
     )
-    bo_phan_tich.add_argument(
-        "--chi_kiem_dinh",
+    parser.add_argument(
+        "--validate_only",
         action="store_true",
-        help="Chỉ thực hiện kiểm định, bỏ qua bước hợp nhất",
+        help="Run validation only — skip null cleaning and table merging",
     )
-
-    return bo_phan_tich.parse_args()
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    tham_so = _phan_tich_tham_so()
+    args    = _parse_args()
+    project_root = Path(__file__).parent
+    raw_dir      = (project_root / args.data_dir).resolve()
 
-    # Xác định đường dẫn tuyệt đối
-    thu_muc_goc = Path(__file__).parent
-    thu_muc_raw = (thu_muc_goc / tham_so.thu_muc).resolve()
-
-    chay_pipeline(
-        thu_muc_raw=thu_muc_raw,
-        co_hop_nhat=not tham_so.chi_kiem_dinh,
-        chi_kiem_dinh=tham_so.chi_kiem_dinh,
+    run_pipeline(
+        raw_dir=raw_dir,
+        validate_only=args.validate_only,
     )

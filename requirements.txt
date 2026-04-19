@@ -1,31 +1,31 @@
 # ==========================================
-# Xử lý & Phân tích Dữ liệu
+# Data Processing & Analysis
 # ==========================================
 pandas>=2.0.0
 numpy>=1.24.0
 
 # ==========================================
-# Báo cáo & Ghi log
+# Reporting & Logging
 # ==========================================
-colorama>=0.4.6       # Tô màu terminal output
-tabulate>=0.9.0       # In bảng đẹp ra terminal
-openpyxl>=3.1.0      # Xuất báo cáo Excel (tùy chọn)
+colorama>=0.4.6       # Terminal output coloring
+tabulate>=0.9.0       # Pretty table printing
+openpyxl>=3.1.0      # Excel report export (optional)
 
 # ==========================================
-# Kiểm thử (Testing)
+# Testing
 # ==========================================
 pytest>=7.4.0
 pytest-cov>=4.1.0
 
 # ==========================================
-# Chất lượng mã nguồn (Code Quality)
+# Code Quality
 # ==========================================
 black>=23.0.0         # Auto-formatter
 flake8>=6.1.0         # Linter
-isort>=5.12.0         # Sắp xếp import
+isort>=5.12.0         # Import sorting
 
 # ==========================================
-# Phân tích thêm (tùy chọn)
+# Additional Analysis (optional)
 # ==========================================
 matplotlib>=3.7.0
 seaborn>=0.12.0

@@ -1,0 +1,84 @@
+# ==========================================
+# CONFIG: cleaning_rules.yaml
+# ==========================================
+# Purpose: Define data cleaning rules for each column type.
+#          The pipeline reads this file to apply them.
+
+# TERMINOLOGY EXPLANATION:
+#   - strip       : Remove leading/trailing whitespace
+#   - title_case  : Capitalize first letter of each word ("john doe" → "John Doe")
+#   - upper_case  : Full UPPER CASE ("vn" → "VN")
+#   - lower_case  : Full lower case ("EMAIL@GMAIL.COM" → "email@gmail.com")
+#   - digits_only : Keep only numeric digits (remove spaces, dashes)
+#   - drop_negatives: Remove rows with negative values (price cannot be negative)
+#   - fill_na     : Fill default values in empty cells
+
+# ── Rules applied by COLUMN NAME ───────────────────────────
+
+column_rules:
+  # Customer / Product / Location names
+  customer_name:
+    - strip
+    - title_case
+  product_name:
+    - strip
+  city:
+    - strip
+    - title_case
+  province:
+    - strip
+    - title_case
+  region:
+    - strip
+    - upper_case
+
+  # Email → always lowercase + strip
+  email:
+    - strip
+    - lower_case
+
+  # Phone number → keep digits only
+  phone:
+    - strip
+    - digits_only
+
+  # ID Codes → UPPER CASE for consistency
+  order_id:
+    - strip
+    - upper_case
+  product_id:
+    - strip
+    - upper_case
+  customer_id:
+    - strip
+    - upper_case
+  promo_code:
+    - strip
+    - upper_case
+
+# ── Rules applied by COLUMN TYPE ───────────────────────────
+
+type_rules:
+  # Price/Money columns: must not be negative
+  numeric_money:
+    - drop_negatives    # Remove rows with negative values
+    - fill_na: 0.0      # Fill 0.0 in empty cells
+
+  # Quantity columns: must not be negative, no decimals
+  numeric_quantity:
+    - drop_negatives
+    - fill_na: 0
+
+  # Date columns: normalize to ISO 8601 format
+  datetime_standard:
+    - format: "%Y-%m-%d %H:%M:%S"   # Target format
+    - fill_na: null                 # Leave null if unparseable
+
+# ── Default fill values for empty cells ────────────────────
+
+default_fills:
+  string: "Unknown"
+  integer: 0
+  float: 0.0
+  datetime: null
+  promo_code: "NO_PROMO"

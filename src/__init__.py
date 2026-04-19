@@ -1,1 +1,1 @@
-# Đây là package src — chứa các module của pipeline
+# src/ — internal pipeline modules: validator, reporter, cleaner, merger

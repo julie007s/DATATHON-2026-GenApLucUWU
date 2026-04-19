@@ -12,36 +12,55 @@ build/
 .eggs/
 *.pyd
 
+# ==========================================
 # Virtual Environment
+# ==========================================
 .venv/
 venv/
 env/
 ENV/
 .env
+.env.local
+.env.*
 
 # ==========================================
 # Jupyter Notebook
 # ==========================================
 .ipynb_checkpoints/
 *.ipynb_checkpoints
+*/.ipynb_checkpoints/*
 
 # ==========================================
-# Dữ liệu nhạy cảm / kết quả xử lý
+# Data Pipeline (Processes & Outputs)
 # ==========================================
-data/output/
-data/cleaned/
-data/logs/
-*.log
+# Ignore processed data but keep the directory structure (via .gitkeep)
+data/interim/*
+!data/interim/.gitkeep
 
-# Không bỏ qua dữ liệu thô (để cộng tác)
-# data/raw/ -- được giữ nguyên
+data/processed/*
+!data/processed/.gitkeep
 
-# File kết quả hợp nhất
+data/output/*
+!data/output/.gitkeep
+
+data/quarantine/*
+!data/quarantine/.gitkeep
+
+# Specifically ignore large output files
+master_table.csv
+validation_report.csv
 du_lieu_tong_hop.csv
 bao_cao_kiem_dinh.csv
 
+# Logs
+*.log
+data/logs/
+
+# Raw data is NOT ignored by default for collaboration
+# data/raw/
+
 # ==========================================
-# IDE / Editor
+# IDE / Editors
 # ==========================================
 .vscode/
 .idea/
@@ -60,9 +79,8 @@ htmlcov/
 .tox/
 
 # ==========================================
-# Môi trường & Biến bí mật
+# Secrets & Local Configs
 # ==========================================
-.env
-.env.local
 secrets.toml
 config_local.py
+auth.yaml

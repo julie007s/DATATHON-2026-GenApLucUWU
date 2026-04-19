@@ -1,166 +1,175 @@
-# Data Pipeline — Kiểm định & Hợp nhất Dữ liệu CSV
+# 🚀 DATATHON — Data Pipeline: Validation, Cleaning & Merging CSV Data
 
-> **Datathon** | Vai trò: Data Engineer | Ngôn ngữ: Python 3.10+
-
----
-
-## 📌 Tổng quan
-
-Pipeline này thực hiện hai giai đoạn chính:
-
-| Giai đoạn | Mô tả |
-|-----------|-------|
-| **1. Kiểm định** | Phát hiện Missing Values, Duplicates, lỗi Data Integrity |
-| **2. Hợp nhất** | Ghép nhiều bảng CSV theo mô hình Star Schema |
+> **Role:** Data Engineer | **Language:** Python 3.10+ | **Date:** 2026-04-19
 
 ---
 
-## 🗂 Cấu trúc Dự án
+## 📌 Project Overview
+
+This pipeline automatically processes **13 e-commerce CSV files** through 3 main stages:
+
+| Stage | Module | Description |
+|-------|--------|-------------|
+| **1. Validation** | `src/validator.py` | Detect Missing Values, Duplicates, and Data Integrity issues |
+| **2. Cleaning** | `src/cleaner.py` | Handle missing values (Null handling) and save to `data/interim/` |
+| **3. Merging** | `src/merger.py` | Join cleaned tables into a single Master table |
+
+**Results:** Files in `data/output/`
+- `master_table.csv` — Complete merged data (Star Schema)
+- `validation_report.csv` — Detailed data quality report for each input file
+
+---
+
+## 🗂 Project Structure
 
 ```
 DATATHON/
-├── pipeline.py              # Điểm vào chính — chạy file này
-├── requirements.txt         # Danh sách thư viện Python cần thiết
-├── .gitignore               # Các file/thư mục git sẽ bỏ qua
+├── pipeline.py              ← RUN THIS FILE to start the full pipeline
+├── requirements.txt         ← List of required libraries
+├── .gitignore
 │
-├── src/                     # Mã nguồn pipeline
+├── configs/                 ← Configuration (no code changes needed for rules)
+│   ├── datatypes.yaml       ← Column data type declarations
+│   └── cleaning_rules.yaml  ← Cleaning rules (strip, digits_only, etc.)
+│
+├── src/                     ← Core Logic
 │   ├── __init__.py
-│   ├── kiem_dinh.py         # Module kiểm định dữ liệu
-│   ├── hop_nhat.py          # Module hợp nhất dữ liệu
-│   └── bao_cao.py           # Module tạo báo cáo
+│   ├── validator.py         ← Missing Values, Duplicates, Data Integrity checks
+│   ├── cleaner.py           ← Null-value cleaning
+│   ├── merger.py            ← Table JOINs via Star Schema
+│   └── reporter.py          ← Aggregate reports, terminal output & CSV export
 │
 ├── data/
-│   ├── raw/                 # ← Đặt file CSV gốc vào đây
-│   │   ├── orders.csv
-│   │   ├── customers.csv
-│   │   └── ...
-│   └── output/              # Kết quả tự động tạo ra (git ignore)
-│       ├── du_lieu_tong_hop.csv
-│       └── bao_cao_kiem_dinh.csv
+│   ├── raw/                 ← 📥 RAW CSV (Input data)
+│   ├── interim/             ← 🔄 Cleaned data (Intermediate steps)
+│   ├── processed/           ← ✅ Encoded/Normalized data
+│   ├── quarantine/          ← 🚫 Erroneous data rows
+│   ├── lookups/             ← 📚 Additional mapping tables
+│   └── output/              ← 📊 FINAL RESULTS (Master table & Reports)
 │
-└── tests/                   # Unit tests
-    └── test_kiem_dinh.py
+├── notebooks/               ← 📓 Jupyter Notebooks for EDA
+│   └── answer.ipynb         ← Main analysis notebook
+│
+├── reports/                 ← 📊 Exported EDA reports (Figures, Profiles)
+│
+├── tests/                   ← ✅ Automated Tests
+│   └── test_validator.py    ← Validator module correctness tests
+└── .venv/                   ← Virtual Environment
 ```
 
 ---
 
-## 🚀 Cài đặt & Chạy
+## 🛠 Environment Setup (Run ONCE)
 
-### 1. Tạo môi trường ảo (Virtual Environment)
+### Step 1 — Open Terminal in the project directory
 
-```bash
-# Tạo venv
-python -m venv .venv
-
-# Kích hoạt (Windows)
-.venv\Scripts\activate
-
-# Kích hoạt (macOS/Linux)
-source .venv/bin/activate
+```powershell
+# On Windows: Open PowerShell and navigate to the folder
+cd d:\DATATHON
 ```
 
-### 2. Cài đặt thư viện
+---
 
-```bash
+### Step 2 — Create Virtual Environment
+
+```powershell
+python -m venv .venv
+```
+
+---
+
+### Step 3 — Activate Virtual Environment
+
+```powershell
+# Windows (PowerShell)
+.venv\Scripts\activate
+
+# When successful, the terminal will show (.venv) at the start:
+# (.venv) PS d:\DATATHON>
+```
+
+---
+
+### Step 4 — Install Libraries
+
+```powershell
 pip install -r requirements.txt
 ```
 
-### 3. Chạy pipeline
+---
 
-```bash
-# Chạy đầy đủ (kiểm định + hợp nhất)
+## ▶ Running the Pipeline
+
+### Method 1: Full Execution (Recommended)
+
+```powershell
 python pipeline.py
+```
 
-# Chỉ kiểm định, không hợp nhất
-python pipeline.py --chi_kiem_dinh
+**Execution Flow:**
+1. Discover CSV files in `data/raw/`
+2. **Stage 1 (Validation):** Validate quality of each file → Print detailed report.
+3. **Stage 2 (Cleaning):** Clean Null values → Save intermediate files to `data/interim/`.
+4. **Stage 3 (Merging):** Merge all tables → Save `data/output/master_table.csv`.
+5. **Report:** Save summary report to `data/output/validation_report.csv`.
 
-# Chỉ định thư mục khác
-python pipeline.py --thu_muc path/to/data
+---
+
+### Method 2: Validation Only (Skip cleaning & merging)
+
+```powershell
+python pipeline.py --validate_only
 ```
 
 ---
 
-## 📊 Mô hình Dữ liệu (Star Schema)
+### Method 3: Specify a different data directory
 
+```powershell
+python pipeline.py --data_dir path/to/your/csvs
 ```
-                      [customers]
-                      [geography]
-                           │
-[products] ──→ [order_items] ──→ [ORDERS] ←── [payments]
-[inventory] ─────────────────────────────────── [shipments]
-                                  ↑
-                           [reviews]
-                           [returns]
-```
-
-**Bảng Fact trung tâm:** `orders`  
-**Bảng Dimension:** customers, products, geography, payments, shipments, reviews, returns, inventory
 
 ---
 
-## 📋 Giải thích Thuật ngữ Chuyên ngành
+## 🐍 Code Explanation (Main Modules)
 
-| Thuật ngữ | Tiếng Việt | Giải thích |
-|-----------|------------|------------|
-| **Missing Values** | Giá trị thiếu | Ô dữ liệu bị để trống (NaN/NULL) |
-| **Duplicates** | Dòng trùng lặp | Dòng có nội dung hoàn toàn giống nhau |
-| **Data Integrity** | Toàn vẹn dữ liệu | Dữ liệu đúng kiểu và nhất quán |
-| **Schema** | Cấu trúc bảng | Tập hợp tên cột và kiểu dữ liệu |
-| **Primary Key** | Khóa chính | Cột định danh duy nhất mỗi bản ghi |
-| **Foreign Key** | Khóa ngoại | Cột tham chiếu khóa chính bảng khác |
-| **Append** | Nối chồng | Ghép bảng cùng schema theo chiều dọc |
-| **Join/Merge** | Liên kết ngang | Ghép bảng qua khóa chung |
-| **Left Join** | Nối trái | Giữ toàn bộ dòng bảng trái |
-| **Star Schema** | Lược đồ hình sao | 1 bảng Fact + nhiều bảng Dimension |
-| **Aggregation** | Tổng hợp | Gộp nhiều dòng thành 1 dòng |
-| **DataFrame** | Bảng dữ liệu | Cấu trúc bảng 2D của pandas |
+### `src/validator.py` — Data Validation
+Performs 3 checks:
+- `check_missing_values()`: Counts empty cells (NaN/Null).
+- `check_duplicates()`: Detects fully duplicate rows.
+- `check_data_integrity()`: Ensures numeric columns (Price, Quantity...) contain no invalid characters.
 
----
+### `src/cleaner.py` — Data Cleaning
+Automatically fills or handles missing values based on configuration, preparing data for analysis and merging.
 
-## 👥 Hướng dẫn Cộng tác (Team Collaboration)
+### `src/merger.py` — Data Merging
+Uses the **Star Schema** model to connect tables:
+- **Fact Table:** `orders`
+- **Dimension Tables:** `customers`, `products`, `payments`, `shipments`, etc.
 
-### Git Workflow
-
-```bash
-# Clone dự án
-git clone <repo-url>
-cd DATATHON
-
-# Tạo nhánh tính năng mới
-git checkout -b feature/ten-tinh-nang
-
-# Sau khi hoàn thành
-git add .
-git commit -m "feat: mô tả thay đổi"
-git push origin feature/ten-tinh-nang
-```
-
-### Quy ước Commit Message
-
-```
-feat:  Thêm tính năng mới
-fix:   Sửa lỗi
-docs:  Cập nhật tài liệu
-test:  Thêm/sửa unit test
-refactor: Tái cấu trúc mã (không thêm tính năng/sửa lỗi)
-```
-
-> **Lưu ý:** Thư mục `data/output/` được git ignore. Mỗi thành viên chạy pipeline cục bộ để tạo kết quả.
+### `src/reporter.py` — Reporting
+Aggregates validator results, formats tables using `tabulate`, and exports CSV files for quality management.
 
 ---
 
-## 🧪 Chạy Tests
+## 🧪 Running Unit Tests
 
-```bash
+Ensure code correctness by running the test suite:
+
+```powershell
+# Run all tests in the tests/ directory
 pytest tests/ -v
-pytest tests/ --cov=src --cov-report=term-missing
 ```
 
 ---
 
-## 📁 Đầu ra
+## 📁 Output Files
 
-| File | Vị trí | Mô tả |
-|------|--------|-------|
-| `du_lieu_tong_hop.csv` | `data/output/` | Bảng dữ liệu đã hợp nhất hoàn chỉnh |
-| `bao_cao_kiem_dinh.csv` | `data/output/` | Báo cáo tóm tắt kiểm định từng file |
+| File | Location | Description |
+|------|----------|-------------|
+| `master_table.csv` | `data/output/` | Fully merged data, ready for BI/ML |
+| `validation_report.csv` | `data/output/` | Detailed report on errors and quality of the 13 input files |
+
+---
+
+*Last updated: 2026-04-19*
