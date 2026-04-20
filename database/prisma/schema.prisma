@@ -1,0 +1,199 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Master Tables ────────────────────────────────────────────────────────────
+
+model products {
+  product_id   Int     @id
+  product_name String
+  category     String
+  segment      String
+  size         String
+  color        String
+  price        Float
+  cogs         Float
+
+  order_items order_items[]
+  inventory   inventory[]
+  returns     returns[]
+  reviews     reviews[]
+}
+
+model customers {
+  customer_id         Int      @id
+  zip                 Int
+  city                String
+  signup_date         DateTime @db.Date
+  gender              String?
+  age_group           String?
+  acquisition_channel String?
+
+  geography geography @relation(fields: [zip], references: [zip])
+  orders    orders[]
+  reviews   reviews[]
+}
+
+model promotions {
+  promo_id            String   @id
+  promo_name          String
+  promo_type          String
+  discount_value      Float
+  start_date          DateTime @db.Date
+  end_date            DateTime @db.Date
+  applicable_category String?
+  promo_channel       String?
+  stackable_flag      Int
+  min_order_value     Float?
+
+  order_items_promo1 order_items[] @relation("promo1")
+  order_items_promo2 order_items[] @relation("promo2")
+}
+
+model geography {
+  zip      Int    @id
+  city     String
+  region   String
+  district String
+
+  customers customers[]
+  orders    orders[]
+}
+
+// ─── Transaction Tables ───────────────────────────────────────────────────────
+
+model orders {
+  order_id       Int      @id
+  order_date     DateTime @db.Date
+  customer_id    Int
+  zip            Int
+  order_status   String
+  payment_method String
+  device_type    String
+  order_source   String
+
+  customer  customers   @relation(fields: [customer_id], references: [customer_id])
+  geography geography   @relation(fields: [zip], references: [zip])
+  payments  payments?
+  shipments shipments?
+  returns   returns[]
+  reviews   reviews[]
+  items     order_items[]
+}
+
+model order_items {
+  order_id        Int
+  product_id      Int
+  quantity        Int
+  unit_price      Float
+  discount_amount Float
+  promo_id        String?
+  promo_id_2      String?
+
+  order    orders      @relation(fields: [order_id], references: [order_id])
+  product  products    @relation(fields: [product_id], references: [product_id])
+  promo1   promotions? @relation("promo1", fields: [promo_id], references: [promo_id])
+  promo2   promotions? @relation("promo2", fields: [promo_id_2], references: [promo_id])
+
+  @@id([order_id, product_id])
+}
+
+model payments {
+  order_id       Int    @id
+  payment_method String
+  payment_value  Float
+  installments   Int
+
+  order orders @relation(fields: [order_id], references: [order_id])
+}
+
+model shipments {
+  order_id      Int      @id
+  ship_date     DateTime @db.Date
+  delivery_date DateTime @db.Date
+  shipping_fee  Float
+
+  order orders @relation(fields: [order_id], references: [order_id])
+}
+
+model returns {
+  return_id       String   @id
+  order_id        Int
+  product_id      Int
+  return_date     DateTime @db.Date
+  return_reason   String
+  return_quantity Int
+  refund_amount   Float
+
+  order   orders   @relation(fields: [order_id], references: [order_id])
+  product products @relation(fields: [product_id], references: [product_id])
+}
+
+model reviews {
+  review_id    String   @id
+  order_id     Int
+  product_id   Int
+  customer_id  Int
+  review_date  DateTime @db.Date
+  rating       Int
+  review_title String
+
+  order    orders    @relation(fields: [order_id], references: [order_id])
+  product  products  @relation(fields: [product_id], references: [product_id])
+  customer customers @relation(fields: [customer_id], references: [customer_id])
+}
+
+// ─── Analytical Tables ────────────────────────────────────────────────────────
+
+model sales {
+  date    DateTime @id @db.Date
+  revenue Float
+  cogs    Float
+}
+
+// ─── Operational Tables ───────────────────────────────────────────────────────
+
+model inventory {
+  snapshot_date     DateTime @db.Date
+  product_id        Int
+  stock_on_hand     Int
+  units_received    Int
+  units_sold        Int
+  stockout_days     Int
+  days_of_supply    Float
+  fill_rate         Float
+  stockout_flag     Int
+  overstock_flag    Int
+  reorder_flag      Int
+  sell_through_rate Float
+  product_name      String
+  category          String
+  segment           String
+  year              Int
+  month             Int
+
+  product products @relation(fields: [product_id], references: [product_id])
+
+  @@id([snapshot_date, product_id])
+}
+
+model web_traffic {
+  date                     DateTime @id @db.Date
+  sessions                 Int
+  unique_visitors          Int
+  page_views               Int
+  bounce_rate              Float
+  avg_session_duration_sec Float
+  traffic_source           String
+}
+
