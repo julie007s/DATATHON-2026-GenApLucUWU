@@ -122,9 +122,17 @@ def _agg_order_items(order_items: pd.DataFrame) -> pd.DataFrame:
     """
     # Work on a minimal copy — only the columns we actually need
     needed = [c for c in ["order_id", "product_id", "quantity",
-                           "unit_price", "discount_amount"]
+                           "unit_price", "discount_amount",
+                           "promo_id", "promo_id_2"]
               if c in order_items.columns]
     oi = order_items[needed].copy()
+
+    # Create promotion flag
+    oi["has_promo"] = 0
+    if "promo_id" in oi.columns:
+        oi.loc[oi["promo_id"].notna() & (oi["promo_id"] != ""), "has_promo"] = 1
+    if "promo_id_2" in oi.columns:
+        oi.loc[oi["promo_id_2"].notna() & (oi["promo_id_2"] != ""), "has_promo"] = 1
 
     for col in ["quantity", "unit_price", "discount_amount"]:
         if col in oi.columns:
@@ -135,8 +143,11 @@ def _agg_order_items(order_items: pd.DataFrame) -> pd.DataFrame:
         - oi.get("discount_amount", 0)
     )
 
-    agg_spec: dict = {"total_quantity": ("quantity", "sum"),
-                      "total_item_revenue": ("line_revenue", "sum")}
+    agg_spec: dict = {
+        "total_quantity": ("quantity", "sum"),
+        "total_item_revenue": ("line_revenue", "sum"),
+        "has_promo": ("has_promo", "max")
+    }
     if "product_id" in oi.columns:
         agg_spec["distinct_products"] = ("product_id", "nunique")
 

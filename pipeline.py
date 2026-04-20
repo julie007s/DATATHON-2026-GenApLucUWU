@@ -36,10 +36,20 @@ from colorama import Fore, Style, init
 # Make sure the project root is on sys.path so internal imports work
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.validator import validate_files
+# --- NEW VERSION (Uses datatypes.yaml) ---
+from src.validator_new import validate_files
+from src.cleaner_new   import clean_multiple_files
+from src.featurizer    import run_featurization
+from src.trainer       import train_revenue_model
+from src.predictor     import generate_submission
+
+# --- ORIGINAL VERSION (Hardcoded) ---
+# from src.validator import validate_files
+# from src.cleaner   import clean_multiple_files
+
 from src.reporter  import build_summary_table, print_summary_table, save_report_csv, print_overall_stats
-from src.cleaner   import clean_multiple_files
 from src.merger    import merge_tables
+from src.logger    import logger
 
 init(autoreset=True)
 
@@ -67,6 +77,8 @@ CSV_FILES = [
 def run_pipeline(
     raw_dir: Path,
     validate_only: bool = False,
+    train: bool = False,
+    predict: bool = False,
 ) -> None:
     """
     Main orchestrator for the data pipeline.
@@ -75,10 +87,10 @@ def run_pipeline(
         raw_dir       : Absolute path to the directory containing raw CSV files.
         validate_only : If True, skip cleaning and merging steps.
     """
-    print(f"\n{Fore.MAGENTA}{'█' * 60}")
-    print("  DATA PIPELINE — VALIDATE · CLEAN · MERGE")
-    print(f"  📁 Source directory: {raw_dir}")
-    print(f"{'█' * 60}{Style.RESET_ALL}")
+    logger.info(f"\n{'█' * 60}")
+    logger.info("  DATA PIPELINE — VALIDATE · CLEAN · MERGE · FEATURE · TRAIN")
+    logger.info(f"  📁 Source directory: {raw_dir}")
+    logger.info(f"{'█' * 60}")
 
     # ── STEP 1: Collect existing CSV paths ────────────────────
     csv_paths: list[Path] = []
@@ -139,13 +151,52 @@ def run_pipeline(
         verbose=True,
     )
 
-    # ── STEP 6: Final summary ─────────────────────────────────
-    print(f"\n{Fore.MAGENTA}{'█' * 60}")
-    print("  ✅ PIPELINE COMPLETE!")
-    print(f"  📊 Master table : {master.shape[0]:,} rows × {master.shape[1]} columns")
-    print(f"  📁 Saved to     : data/output/master_table.csv")
-    print(f"  📋 Report saved : data/output/validation_report.csv")
-    print(f"{'█' * 60}{Style.RESET_ALL}\n")
+    # ── STEP 6: Feature Engineering (Daily Aggregation) ──────
+    logger.info(f"\n{Fore.BLUE}{'═' * 60}")
+    logger.info("  STAGE 3: FEATURE ENGINEERING")
+    logger.info(f"{'═' * 60}{Style.RESET_ALL}")
+    
+    feature_table = run_featurization(
+        master_table_path=output_dir / "master_table.csv",
+        raw_dir=raw_dir,
+        output_dir=output_dir,
+        verbose=True
+    )
+
+    # ── STEP 7: Training ──────────────────────────────────────
+    if train:
+        logger.info(f"\n{Fore.BLUE}{'═' * 60}")
+        logger.info("  STAGE 4: MODEL TRAINING")
+        logger.info(f"{'═' * 60}{Style.RESET_ALL}")
+        
+        train_revenue_model(
+            feature_table_path=output_dir / "processed_features.csv",
+            model_output_dir=raw_dir.parent.parent / "models",
+            report_output_dir=raw_dir.parent.parent / "reports",
+            verbose=True
+        )
+
+    # ── STEP 8: Prediction ────────────────────────────────────
+    if predict:
+        logger.info(f"\n{Fore.BLUE}{'═' * 60}")
+        logger.info("  STAGE 5: PREDICTION")
+        logger.info(f"{'═' * 60}{Style.RESET_ALL}")
+        
+        generate_submission(
+            model_path=raw_dir.parent.parent / "models/xgboost_revenue_model.joblib",
+            feature_table_path=output_dir / "processed_features.csv",
+            sample_submission_path=raw_dir / "sample_submission.csv",
+            output_dir=output_dir,
+            verbose=True
+        )
+
+    # ── STEP 9: Final summary ─────────────────────────────────
+    logger.info(f"\n{Fore.MAGENTA}{'█' * 60}")
+    logger.info("  ✅ PIPELINE COMPLETE!")
+    logger.info(f"  📊 Features saved : data/output/processed_features.csv")
+    if predict:
+        logger.info(f"  📄 Submission     : data/output/submission.csv")
+    logger.info(f"{'█' * 60}{Style.RESET_ALL}\n")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -171,6 +222,16 @@ Examples:
         action="store_true",
         help="Run validation only — skip null cleaning and table merging",
     )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="Trigger XGBoost model training",
+    )
+    parser.add_argument(
+        "--predict",
+        action="store_true",
+        help="Generate submission.csv based on trained model",
+    )
     return parser.parse_args()
 
 
@@ -182,4 +243,6 @@ if __name__ == "__main__":
     run_pipeline(
         raw_dir=raw_dir,
         validate_only=args.validate_only,
+        train=args.train,
+        predict=args.predict,
     )
