@@ -1,10 +1,14 @@
 import "dotenv/config";
 import { PrismaClient } from "./generated/prisma/client.js";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { parse } from "csv-parse/sync";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-const prisma = new PrismaClient();
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+});
+const prisma = new PrismaClient({ adapter });
 const RAW_DIR = resolve(import.meta.dirname, "../data/raw");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
