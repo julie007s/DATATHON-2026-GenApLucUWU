@@ -1,0 +1,54 @@
+# ==========================================
+# CONFIG: features.yaml
+# ==========================================
+features:
+  # ── ROW LEVEL ──────────────────────────
+  - action: "add"
+    name: "is_promotion"
+    formula: "(df['promo_id'] != 'NO_PROMO') * 1"
+    scope: "row"
+
+  - action: "add"
+    name: "delivery_days"
+    formula: "(df['delivery_date'] - df['order_date']).dt.days"
+    scope: "row"
+
+  - action: "add"
+    name: "is_low_stock"
+    formula: "(df['stock_on_hand'] < 10) * 1"
+    scope: "row"
+
+  # ── DAILY LEVEL ────────────────────────
+  - action: "add"
+    name: "day_of_week"
+    formula: "df['Date'].dt.dayofweek"
+    scope: "daily"
+
+  - action: "add"
+    name: "month"
+    formula: "df['Date'].dt.month"
+    scope: "daily"
+
+  - action: "add"
+    name: "year"
+    formula: "df['Date'].dt.year"
+    scope: "daily"
+
+  # ── REMOVE SAME-DAY LEAKY COLUMNS (replaced by lag/roll versions) ──
+  # These raw daily aggregates are computed from the CURRENT day's orders,
+  # so using them directly would be look-ahead leakage.
+  # Their lag-1 / lag-7 / roll-7 counterparts are kept as features.
+  - action: "remove"
+    name:
+      - "daily_order_count"
+      - "daily_total_item_revenue"
+      - "daily_total_quantity"
+      - "avg_delivery_days"
+      - "daily_promo_order_count"
+      - "sessions"
+      - "unique_visitors"
+      - "page_views"
+      - "bounce_rate"
+      - "avg_session_duration_sec"
+      - "traffic_source"
+    scope: "daily"

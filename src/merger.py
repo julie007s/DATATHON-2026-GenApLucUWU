@@ -3,22 +3,22 @@
 MODULE: merger.py  (Star Schema Data Merger)
 ============================================================
 Purpose: Join all cleaned CSV tables into one master table
-         using a Star Schema pattern centred on `orders`.
+         using a Star Schema pattern centred on `order_items`.
 
 STAR SCHEMA:
-  FACT table   : orders
-  DIMENSIONS   : customers, order_items, products, payments,
+  FACT table   : order_items
+  DIMENSIONS   : orders, customers, products, payments,
                  shipments, reviews, returns, geography,
                  inventory (aggregated), promotions
 
 JOIN STRATEGY:
   All joins are LEFT JOINs from the fact table outwards so
-  that every order row is preserved even when dimension data
+  that every order line item is preserved even when dimension data
   is missing (nulls after join are expected and acceptable).
 
 RAM SAFETY:
   - Every raw dimension table is deleted (del + gc.collect())
-    immediately after its aggregated form is produced.
+    immediately after it is joined.
   - _agg_inventory() is hardened against missing/renamed
     date columns: it always returns exactly one row per
     product_id regardless of whether a date column exists.
@@ -82,6 +82,15 @@ def _safe_merge(
         print(f"  {Fore.YELLOW}⚠  Skipping join: {label} (table not available){Style.RESET_ALL}")
         return left
 
+    # Check if the join keys exist in both tables
+    keys = [on] if isinstance(on, str) else on
+    missing_left = [k for k in keys if k not in left.columns]
+    missing_right = [k for k in keys if k not in right.columns]
+    
+    if missing_left or missing_right:
+        print(f"  {Fore.RED}⚠  Skipping join: {label}. Missing keys. Left missing: {missing_left}, Right missing: {missing_right}{Style.RESET_ALL}")
+        return left
+
     before_rows = len(left)
     before_cols = len(left.columns)
 
@@ -107,53 +116,6 @@ def _safe_merge(
 # ──────────────────────────────────────────────────────────
 # DIMENSION PRE-PROCESSING
 # ──────────────────────────────────────────────────────────
-
-def _agg_order_items(order_items: pd.DataFrame) -> pd.DataFrame:
-    """
-    Aggregate order_items to one row per order_id.
-
-    Returns only the aggregated summary — the original table should be
-    deleted by the caller after this function returns.
-
-    Aggregations:
-      - total_quantity     : sum of quantity
-      - total_item_revenue : sum of (unit_price × quantity - discount_amount)
-      - distinct_products  : number of unique product_ids per order
-    """
-    # Work on a minimal copy — only the columns we actually need
-    needed = [c for c in ["order_id", "product_id", "quantity",
-                           "unit_price", "discount_amount",
-                           "promo_id", "promo_id_2"]
-              if c in order_items.columns]
-    oi = order_items[needed].copy()
-
-    # Create promotion flag
-    oi["has_promo"] = 0
-    if "promo_id" in oi.columns:
-        oi.loc[oi["promo_id"].notna() & (oi["promo_id"] != ""), "has_promo"] = 1
-    if "promo_id_2" in oi.columns:
-        oi.loc[oi["promo_id_2"].notna() & (oi["promo_id_2"] != ""), "has_promo"] = 1
-
-    for col in ["quantity", "unit_price", "discount_amount"]:
-        if col in oi.columns:
-            oi[col] = pd.to_numeric(oi[col], errors="coerce").fillna(0)
-
-    oi["line_revenue"] = (
-        oi.get("unit_price", 0) * oi.get("quantity", 0)
-        - oi.get("discount_amount", 0)
-    )
-
-    agg_spec: dict = {
-        "total_quantity": ("quantity", "sum"),
-        "total_item_revenue": ("line_revenue", "sum"),
-        "has_promo": ("has_promo", "max")
-    }
-    if "product_id" in oi.columns:
-        agg_spec["distinct_products"] = ("product_id", "nunique")
-
-    agg = oi.groupby("order_id").agg(**agg_spec).reset_index()
-    return agg
-
 
 def _agg_inventory(inventory: pd.DataFrame) -> pd.DataFrame:
     """
@@ -202,34 +164,12 @@ def _agg_inventory(inventory: pd.DataFrame) -> pd.DataFrame:
         inv = inv.groupby("product_id", sort=False).last().reset_index()
 
     # Return only the columns that exist in this particular inventory file
+    # Updated to include stockout_flag and stockout_days for supply chain analysis
     keep = ["product_id"] + [
-        c for c in ["stock_on_hand", "fill_rate", "sell_through_rate"]
+        c for c in ["stock_on_hand", "fill_rate", "sell_through_rate", "stockout_flag", "stockout_days"]
         if c in inv.columns
     ]
     return inv[keep]
-
-
-def _primary_product_per_order(order_items: pd.DataFrame) -> pd.DataFrame:
-    """
-    Return a one-row-per-order mapping to the most common product_id.
-
-    Used to join dimension tables (products, inventory) that are keyed on
-    product_id rather than order_id.
-
-    Args:
-        order_items: Raw order_items DataFrame (must contain order_id,
-                     product_id).
-
-    Returns:
-        DataFrame with columns [order_id, primary_product_id].
-    """
-    return (
-        order_items[["order_id", "product_id"]]
-        .groupby("order_id")["product_id"]
-        .agg(lambda s: s.mode().iat[0] if len(s) > 0 else pd.NA)
-        .reset_index()
-        .rename(columns={"product_id": "primary_product_id"})
-    )
 
 
 # ──────────────────────────────────────────────────────────
@@ -245,22 +185,22 @@ def merge_tables(
     """
     Load all cleaned tables from interim/ and join them into a master table.
 
-    Join sequence (all LEFT JOINs from orders outward):
-      orders
+    Join sequence (all LEFT JOINs from order_items outward):
+      order_items
+        ← orders          (order_id)
         ← customers       (customer_id)
         ← geography       (city + province)
-        ← order_items_agg (order_id)          ← raw order_items freed here
-        ← products        (primary_product_id)
-        ← payments_agg    (order_id)           ← raw payments freed here
-        ← shipments       (order_id)           ← raw shipments freed here
-        ← reviews_agg     (order_id)           ← raw reviews freed here
-        ← returns_agg     (order_id)           ← raw returns freed here
-        ← promotions      (promo_code)         ← raw promotions freed here
-        ← inventory_agg   (primary_product_id) ← raw inventory freed here
+        ← products        (product_id)
+        ← payments        (order_id)
+        ← shipments       (order_id)
+        ← reviews         (order_id, product_id)
+        ← returns         (order_id, product_id)
+        ← promotions      (promo_id)
+        ← inventory_agg   (product_id)
 
     RAM strategy:
       Each raw dimension DataFrame is deleted and garbage-collected
-      immediately after its aggregated/filtered form is produced.
+      immediately after it is joined.
 
     Args:
         interim_dir     : Directory containing cleaned CSV files.
@@ -273,25 +213,40 @@ def merge_tables(
     """
     if verbose:
         print(f"\n{Fore.BLUE}{'═' * 60}")
-        print("  STAGE 2: DATA MERGING (Star Schema)")
+        print("  STAGE 2: DATA MERGING (Star Schema - Item Level)")
         print(f"{'═' * 60}{Style.RESET_ALL}")
 
-    # ── Load all tables ───────────────────────────────────────
-    # Large tables are loaded one at a time and freed as soon as possible.
-    orders = _load(interim_dir, "orders.csv")
-    if orders is None:
+    # ── Load Fact Table ───────────────────────────────────────
+    order_items = _load(interim_dir, "order_items.csv")
+    if order_items is None:
         raise FileNotFoundError(
-            "orders.csv not found in interim/. "
+            "order_items.csv not found in interim/. "
             "Run the validation + cleaning step first."
         )
 
-    master = orders.copy()
+    master = order_items.copy()
+    del order_items
+    gc.collect()
+
+    # Create a line_revenue column early for convenience
+    if all(c in master.columns for c in ["unit_price", "quantity"]):
+        master["line_revenue"] = (
+            pd.to_numeric(master["unit_price"], errors="coerce").fillna(0) * 
+            pd.to_numeric(master["quantity"], errors="coerce").fillna(0)
+        )
+        if "discount_amount" in master.columns:
+            master["line_revenue"] -= pd.to_numeric(master["discount_amount"], errors="coerce").fillna(0)
+
+    # ── Join orders ───────────────────────────────────────────
+    orders = _load(interim_dir, "orders.csv")
+    master = _safe_merge(master, orders, on="order_id", label="orders")
     del orders
     gc.collect()
 
     # ── Join customers ────────────────────────────────────────
     customers = _load(interim_dir, "customers.csv")
-    master = _safe_merge(master, customers, on="customer_id", label="customers")
+    if customers is not None and "customer_id" in master.columns:
+        master = _safe_merge(master, customers, on="customer_id", label="customers")
     del customers
     gc.collect()
 
@@ -304,119 +259,168 @@ def merge_tables(
     del geography
     gc.collect()
 
-    # ── Aggregate order_items → join → free raw table ────────
-    order_items = _load(interim_dir, "order_items.csv")
-    if order_items is not None:
-        oi_agg = _agg_order_items(order_items)
-        master = _safe_merge(master, oi_agg, on="order_id", label="order_items (aggregated)")
-        del oi_agg
-        gc.collect()
+    # ── Join products ─────────────────────────────────────────
+    products = _load(interim_dir, "products.csv")
+    if products is not None and "product_id" in master.columns:
+        master = _safe_merge(master, products, on="product_id", label="products")
+    del products
+    gc.collect()
 
-        # ── Map primary product per order (while order_items is still loaded)
-        if "product_id" in order_items.columns:
-            primary_product = _primary_product_per_order(order_items)
-        else:
-            primary_product = None
-
-        del order_items
-        gc.collect()
-
-        # ── Join products via primary_product_id ──────────────
-        products = _load(interim_dir, "products.csv")
-        if products is not None and primary_product is not None:
-            master = master.merge(primary_product, on="order_id", how="left")
-            del primary_product
-            gc.collect()
-
-            products_renamed = products.rename(
-                columns={"product_id": "primary_product_id"}
-            )
-            del products
-            gc.collect()
-
-            master = _safe_merge(
-                master, products_renamed,
-                on="primary_product_id", label="products"
-            )
-            del products_renamed
-            gc.collect()
-        else:
-            del primary_product, products
-            gc.collect()
-
-    # ── Aggregate payments → join → free ─────────────────────
+    # ── Join payments ─────────────────────────────────────────
     payments = _load(interim_dir, "payments.csv")
     if payments is not None:
+        # Prevent fan-out if an order has multiple payment methods.
+        # We aggregate to total payment per order to be safe.
         pay_agg = payments.groupby("order_id").agg(
-            total_payment =("payment_value", "sum"),
+            payment_value=("payment_value", "sum"),
             payment_method=("payment_method", "first"),
-            installments  =("installments",  "max"),
+            installments=("installments", "max"),
         ).reset_index()
         del payments
         gc.collect()
 
-        master = _safe_merge(master, pay_agg, on="order_id", label="payments (aggregated)")
+        master = _safe_merge(master, pay_agg, on="order_id", label="payments")
         del pay_agg
         gc.collect()
 
-    # ── Join shipments → free ─────────────────────────────────
+    # ── Join shipments ────────────────────────────────────────
     shipments = _load(interim_dir, "shipments.csv")
     master = _safe_merge(master, shipments, on="order_id", label="shipments")
     del shipments
     gc.collect()
 
-    # ── Aggregate reviews → join → free ──────────────────────
+    # ── Join reviews ──────────────────────────────────────────
     reviews = _load(interim_dir, "reviews.csv")
     if reviews is not None:
-        rev_agg = reviews.groupby("order_id").agg(
-            avg_rating  =("rating", "mean"),
-            review_count=("rating", "count"),
-        ).reset_index()
-        del reviews
-        gc.collect()
+        # Deduplicate to prevent fan-out if multiple reviews for same product in an order
+        if all(c in reviews.columns for c in ["order_id", "product_id"]):
+            rev_dedup = reviews.drop_duplicates(subset=["order_id", "product_id"], keep="last")
+            master = _safe_merge(master, rev_dedup, on=["order_id", "product_id"], label="reviews")
+            del rev_dedup
+        else:
+            # Fallback to order_id if product_id is missing
+            rev_dedup = reviews.drop_duplicates(subset=["order_id"], keep="last")
+            master = _safe_merge(master, rev_dedup, on="order_id", label="reviews (order level)")
+            del rev_dedup
+    del reviews
+    gc.collect()
 
-        master = _safe_merge(master, rev_agg, on="order_id", label="reviews (aggregated)")
-        del rev_agg
-        gc.collect()
-
-    # ── Aggregate returns → join → free ──────────────────────
+    # ── Join returns ──────────────────────────────────────────
     returns = _load(interim_dir, "returns.csv")
     if returns is not None:
-        ret_agg = returns.groupby("order_id").agg(
-            total_return_qty   =("return_quantity", "sum"),
-            total_refund_amount=("refund_amount",   "sum"),
-        ).reset_index()
-        del returns
-        gc.collect()
+        if all(c in returns.columns for c in ["order_id", "product_id"]):
+            # Group by order_id and product_id to sum return quantity just in case
+            ret_agg = returns.groupby(["order_id", "product_id"]).agg(
+                return_quantity=("return_quantity", "sum"),
+                refund_amount=("refund_amount", "sum"),
+                return_reason=("return_reason", "first")
+            ).reset_index()
+            master = _safe_merge(master, ret_agg, on=["order_id", "product_id"], label="returns")
+            del ret_agg
+        else:
+            # Fallback to order_id
+            ret_agg = returns.groupby("order_id").agg(
+                return_quantity=("return_quantity", "sum"),
+                refund_amount=("refund_amount", "sum"),
+                return_reason=("return_reason", "first")
+            ).reset_index()
+            master = _safe_merge(master, ret_agg, on="order_id", label="returns (order level)")
+            del ret_agg
+    del returns
+    gc.collect()
 
-        master = _safe_merge(master, ret_agg, on="order_id", label="returns (aggregated)")
-        del ret_agg
-        gc.collect()
-
-    # ── Join promotions → free ────────────────────────────────
+    # ── Join promotions ───────────────────────────────────────
     promotions = _load(interim_dir, "promotions.csv")
-    if promotions is not None and "promo_code" in master.columns:
-        master = _safe_merge(master, promotions, on="promo_code", label="promotions")
+    if promotions is not None and "promo_id" in master.columns:
+        keep_cols = [
+            "promo_id", "promo_type", "discount_value", 
+            "promo_channel", "min_order_value"
+        ]
+        promotions_subset = promotions[[c for c in keep_cols if c in promotions.columns]].drop_duplicates(subset=["promo_id"])
+        master = _safe_merge(master, promotions_subset, on="promo_id", label="promotions")
+        del promotions_subset
     del promotions
     gc.collect()
 
-    # ── Aggregate inventory → join → free ─────────────────────
+    # ── Join inventory ────────────────────────────────────────
     inventory = _load(interim_dir, "inventory.csv")
-    if inventory is not None and "primary_product_id" in master.columns:
+    if inventory is not None and "product_id" in master.columns:
         inv_agg = _agg_inventory(inventory)
         del inventory
         gc.collect()
 
-        inv_agg = inv_agg.rename(columns={"product_id": "primary_product_id"})
         master = _safe_merge(
             master, inv_agg,
-            on="primary_product_id", label="inventory (latest snapshot)"
+            on="product_id", label="inventory (latest snapshot)"
         )
         del inv_agg
         gc.collect()
     elif inventory is not None:
         del inventory
         gc.collect()
+
+    # ── Business Logic: Filter Canceled & Calculate Financials ────
+    if "order_status" in master.columns:
+        initial_count = len(master)
+        master = master[master["order_status"] != "cancelled"].copy()
+        if verbose:
+            print(f"  ✂  Filtered out {initial_count - len(master):,} 'cancelled' orders (Net Revenue focus).")
+
+    # Calculate line_cogs (The anchor for profit)
+    if all(c in master.columns for c in ["quantity", "cogs"]):
+        master["line_cogs"] = (
+            pd.to_numeric(master["quantity"], errors="coerce").fillna(0) * 
+            pd.to_numeric(master["cogs"], errors="coerce").fillna(0)
+        )
+        if verbose:
+            print("  💰 Calculated 'line_cogs' as a deterministic anchor.")
+
+    # Flag Legacy Orders (Omnichannel insight)
+    if all(c in master.columns for c in ["order_date", "signup_date"]):
+        master["is_legacy"] = (pd.to_datetime(master["order_date"]) < pd.to_datetime(master["signup_date"])).astype(int)
+        if verbose:
+            legacy_pct = master["is_legacy"].mean() * 100
+            print(f"  🏷  Flagged Legacy orders ({legacy_pct:.1f}% of total).")
+
+    # Calculate Historical Return Probability by Category (Refund Lag mitigation)
+    if all(c in master.columns for c in ["category", "order_status"]):
+        cat_returns = master.groupby("category")["order_status"].apply(lambda x: (x == "returned").mean()).reset_index()
+        cat_returns.rename(columns={"order_status": "category_return_prob"}, inplace=True)
+        master = master.merge(cat_returns, on="category", how="left")
+        master["category_return_prob"] = master["category_return_prob"].fillna(0)
+        if verbose:
+            print("  👗 Added 'category_return_prob' to handle refund lag and risk.")
+
+    # ── Handle Nulls in Analytical Columns ───────────────────
+    if verbose:
+        print(f"  🔧 Filling nulls in remaining analytical columns...")
+    
+    # 1. Shipping & Returns
+    if "shipping_fee" in master.columns:
+        master["shipping_fee"] = master["shipping_fee"].fillna(0)
+    if "return_quantity" in master.columns:
+        master["return_quantity"] = master["return_quantity"].fillna(0)
+    if "refund_amount" in master.columns:
+        master["refund_amount"] = master["refund_amount"].fillna(0)
+    if "rating" in master.columns:
+        master["rating"] = master["rating"].fillna(0)
+    if "review_title" in master.columns:
+        master["review_title"] = master["review_title"].fillna("None")
+    if "review_id" in master.columns:
+        master["review_id"] = master["review_id"].fillna("NO_REVIEW")
+
+    # ── Drop Redundant/Empty-leaning Columns ────────────────
+    drop_cols = ["customer_id_dim", "review_date", "zip_dim"]
+    master = master.drop(columns=[c for c in drop_cols if c in master.columns])
+    if verbose:
+        print(f"  🗑  Dropped redundant columns: {drop_cols}")
+
+    # ── Sort master table ─────────────────────────────────────
+    if "order_date" in master.columns:
+        master["order_date"] = pd.to_datetime(master["order_date"], errors="coerce")
+        master = master.sort_values(["order_date", "order_id"]).reset_index(drop=True)
+        if verbose:
+            print(f"  ✔  Sorted master table chronologically by 'order_date'")
 
     # ── Save master table ─────────────────────────────────────
     output_dir.mkdir(parents=True, exist_ok=True)

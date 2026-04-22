@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 # --- NEW VERSION (Uses datatypes.yaml) ---
 from src.validator_new import validate_files
 from src.cleaner_new   import clean_multiple_files
+from src.encoder       import run_encoding
 from src.featurizer    import run_featurization
 from src.trainer       import train_revenue_model
 from src.predictor     import generate_submission
@@ -79,6 +80,7 @@ def run_pipeline(
     validate_only: bool = False,
     train: bool = False,
     predict: bool = False,
+    train_until: str = None,
 ) -> None:
     """
     Main orchestrator for the data pipeline.
@@ -151,15 +153,29 @@ def run_pipeline(
         verbose=True,
     )
 
+    # ── STEP 5.5: Target Encoding (Row-Level) ─────────────────
+    logger.info(f"\n{Fore.BLUE}{'═' * 60}")
+    logger.info("  STAGE 2.5: TARGET ENCODING")
+    logger.info(f"{'═' * 60}{Style.RESET_ALL}")
+    
+    encoded_master = run_encoding(
+        master_table_path=output_dir / "master_table.csv",
+        output_dir=output_dir,
+        model_output_dir=raw_dir.parent.parent / "models",
+        config_path=raw_dir.parent.parent / "configs" / "encoding.yaml",
+        verbose=True
+    )
+
     # ── STEP 6: Feature Engineering (Daily Aggregation) ──────
     logger.info(f"\n{Fore.BLUE}{'═' * 60}")
     logger.info("  STAGE 3: FEATURE ENGINEERING")
     logger.info(f"{'═' * 60}{Style.RESET_ALL}")
     
     feature_table = run_featurization(
-        master_table_path=output_dir / "master_table.csv",
+        master_table_path=output_dir / "encoded_master.parquet",
         raw_dir=raw_dir,
         output_dir=output_dir,
+        config_path=raw_dir.parent.parent / "configs" / "features.yaml",
         verbose=True
     )
 
@@ -170,9 +186,10 @@ def run_pipeline(
         logger.info(f"{'═' * 60}{Style.RESET_ALL}")
         
         train_revenue_model(
-            feature_table_path=output_dir / "processed_features.csv",
+            feature_table_path=output_dir / "featured_table.parquet",
             model_output_dir=raw_dir.parent.parent / "models",
             report_output_dir=raw_dir.parent.parent / "reports",
+            train_until=train_until,
             verbose=True
         )
 
@@ -184,16 +201,17 @@ def run_pipeline(
         
         generate_submission(
             model_path=raw_dir.parent.parent / "models/xgboost_revenue_model.joblib",
-            feature_table_path=output_dir / "processed_features.csv",
+            feature_table_path=output_dir / "featured_table.parquet",
             sample_submission_path=raw_dir / "sample_submission.csv",
             output_dir=output_dir,
+            cogs_model_path=raw_dir.parent.parent / "models/xgboost_cogs_model.joblib",
             verbose=True
         )
 
     # ── STEP 9: Final summary ─────────────────────────────────
     logger.info(f"\n{Fore.MAGENTA}{'█' * 60}")
     logger.info("  ✅ PIPELINE COMPLETE!")
-    logger.info(f"  📊 Features saved : data/output/processed_features.csv")
+    logger.info(f"  📊 Features saved : data/output/featured_table.parquet")
     if predict:
         logger.info(f"  📄 Submission     : data/output/submission.csv")
     logger.info(f"{'█' * 60}{Style.RESET_ALL}\n")
@@ -232,6 +250,12 @@ Examples:
         action="store_true",
         help="Generate submission.csv based on trained model",
     )
+    parser.add_argument(
+        "--train_until",
+        type=str,
+        default=None,
+        help="Date string (YYYY-MM-DD) to split training and holdout sets. e.g. '2022-01-01'",
+    )
     return parser.parse_args()
 
 
@@ -245,4 +269,5 @@ if __name__ == "__main__":
         validate_only=args.validate_only,
         train=args.train,
         predict=args.predict,
+        train_until=args.train_until,
     )

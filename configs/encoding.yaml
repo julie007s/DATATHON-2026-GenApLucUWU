@@ -1,0 +1,4 @@
+target_encoding:
+  columns: ["category", "city"]
+  target_col: "line_revenue"      # Column created in merger.py: unit_price * quantity - discount_amount
+  smoothing_weight: 10            # Smoothing weight for target encoding prior
