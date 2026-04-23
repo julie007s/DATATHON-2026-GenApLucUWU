@@ -117,59 +117,55 @@ def _safe_merge(
 # DIMENSION PRE-PROCESSING
 # ──────────────────────────────────────────────────────────
 
-def _agg_inventory(inventory: pd.DataFrame) -> pd.DataFrame:
+def _agg_inventory_temporal(inventory: pd.DataFrame) -> pd.DataFrame:
     """
-    Aggregate inventory to exactly ONE row per product_id.
+    Prepare inventory for a temporally-safe join keyed on
+    (product_id, order_year, order_month).
 
-    Strategy (in priority order):
-      1. If a date-like column exists → keep the row with the most recent date.
-         The column is auto-detected: tries 'date', 'Date', 'snapshot_date',
-         'record_date', 'updated_at' in order.
-      2. If no date column is found → keep the LAST row per product_id
-         (as it appears in the file). This guarantees uniqueness and avoids
-         the fan-out that would occur if the raw table were joined directly.
+    Problem with the old approach:
+        Taking the latest snapshot per product_id and joining on product_id alone
+        means orders from 2012 receive stock levels captured in 2022 — pure future
+        data leakage.
 
-    Only the columns needed for the join are returned:
-      product_id, stock_on_hand, fill_rate, sell_through_rate
+    Fix:
+        Each end-of-month snapshot (month M) is assigned to orders placed in
+        month M+1.  Since snapshot_date is always the last day of the month,
+        adding 1 day reliably gives the 1st of the next month, from which we
+        extract the applicable order year/month.
 
-    Args:
-        inventory: Raw (or cleaned) inventory DataFrame.
+        Result: an order on 2012-07-10 sees the 2012-06 snapshot (NaN, because
+        the first inventory snapshot is 2012-07-31) rather than the 2022-12-31
+        snapshot.  NaN fill happens downstream in the null-handling section.
 
     Returns:
-        DataFrame with exactly one row per product_id.
+        DataFrame keyed by [product_id, order_year, order_month] with columns:
+        stock_on_hand, fill_rate, sell_through_rate, stockout_flag, stockout_days
+        (whichever exist in the source file).
     """
-    # Candidate date column names (case-sensitive, checked in order)
-    DATE_CANDIDATES = ["date", "Date", "snapshot_date", "record_date", "updated_at"]
-
     inv = inventory.copy()
-    date_col: str | None = next(
-        (c for c in DATE_CANDIDATES if c in inv.columns), None
-    )
+    inv["snapshot_date"] = pd.to_datetime(inv["snapshot_date"], errors="coerce")
+    inv = inv.dropna(subset=["snapshot_date"])
 
-    if date_col is not None:
-        inv[date_col] = pd.to_datetime(inv[date_col], errors="coerce")
-        # Sort ascending so .last() gives the most recent row per product
-        inv = (
-            inv.sort_values(date_col)
-               .groupby("product_id", sort=False)
-               .last()
-               .reset_index()
-        )
-        print(f"       (inventory deduplicated on '{date_col}': latest row per product)")
-    else:
-        print(
-            f"  {Fore.YELLOW}⚠  inventory.csv has no recognised date column. "
-            f"Using last row per product_id to ensure uniqueness.{Style.RESET_ALL}"
-        )
-        inv = inv.groupby("product_id", sort=False).last().reset_index()
+    # snapshot_date is end-of-month → +1 day = 1st of next month
+    next_day = inv["snapshot_date"] + pd.Timedelta(days=1)
+    inv["order_year"]  = next_day.dt.year
+    inv["order_month"] = next_day.dt.month
 
-    # Return only the columns that exist in this particular inventory file
-    # Updated to include stockout_flag and stockout_days for supply chain analysis
-    keep = ["product_id"] + [
-        c for c in ["stock_on_hand", "fill_rate", "sell_through_rate", "stockout_flag", "stockout_days"]
+    keep = ["product_id", "order_year", "order_month"] + [
+        c for c in ["stock_on_hand", "fill_rate", "sell_through_rate",
+                    "stockout_flag", "stockout_days"]
         if c in inv.columns
     ]
-    return inv[keep]
+
+    # If the same (product, order_month) has multiple rows (edge case), keep latest.
+    inv_agg = (
+        inv.sort_values("snapshot_date")
+           .groupby(["product_id", "order_year", "order_month"], sort=False)
+           .last()
+           .reset_index()
+    )
+    print("       (inventory: temporal join on product_id × order_year × order_month, 1-month lag)")
+    return inv_agg[[c for c in keep if c in inv_agg.columns]]
 
 
 # ──────────────────────────────────────────────────────────
@@ -228,6 +224,13 @@ def merge_tables(
     del order_items
     gc.collect()
 
+    # ── Create synthetic primary key for each order line item ─────
+    # order_item_id = "<order_id>_<product_id>" — used as the join key
+    # for item-level dimension tables (reviews, returns).
+    master["order_item_id"] = (
+        master["order_id"].astype(str) + "_" + master["product_id"].astype(str)
+    )
+
     # Create a line_revenue column early for convenience
     if all(c in master.columns for c in ["unit_price", "quantity"]):
         master["line_revenue"] = (
@@ -246,16 +249,21 @@ def merge_tables(
     # ── Join customers ────────────────────────────────────────
     customers = _load(interim_dir, "customers.csv")
     if customers is not None and "customer_id" in master.columns:
-        master = _safe_merge(master, customers, on="customer_id", label="customers")
+        # Drop columns from customers that already exist in master (e.g. zip, city from
+        # orders) to prevent redundant _dim-suffixed duplicates in the output.
+        dup_cols = [c for c in customers.columns if c != "customer_id" and c in master.columns]
+        cust_slim = customers.drop(columns=dup_cols, errors="ignore")
+        master = _safe_merge(master, cust_slim, on="customer_id", label="customers")
     del customers
     gc.collect()
 
     # ── Join geography ────────────────────────────────────────
     geography = _load(interim_dir, "geography.csv")
-    if geography is not None and all(c in master.columns for c in ["city", "province"]):
-        master = _safe_merge(
-            master, geography, on=["city", "province"], label="geography"
-        )
+    if geography is not None and "zip" in master.columns:
+        # Correct FK is zip (not city+province — province column does not exist).
+        # Only bring in region and district; city is already in master from orders.
+        geo_cols = ["zip"] + [c for c in ["region", "district"] if c in geography.columns]
+        master = _safe_merge(master, geography[geo_cols], on="zip", label="geography")
     del geography
     gc.collect()
 
@@ -273,9 +281,10 @@ def merge_tables(
         # We aggregate to total payment per order to be safe.
         pay_agg = payments.groupby("order_id").agg(
             payment_value=("payment_value", "sum"),
-            payment_method=("payment_method", "first"),
             installments=("installments", "max"),
         ).reset_index()
+        # payment_method is NOT re-added here — it already exists in master from the
+        # orders join and is 100% identical (confirmed by data audit, 0 mismatches).
         del payments
         gc.collect()
 
@@ -292,13 +301,22 @@ def merge_tables(
     # ── Join reviews ──────────────────────────────────────────
     reviews = _load(interim_dir, "reviews.csv")
     if reviews is not None:
-        # Deduplicate to prevent fan-out if multiple reviews for same product in an order
         if all(c in reviews.columns for c in ["order_id", "product_id"]):
-            rev_dedup = reviews.drop_duplicates(subset=["order_id", "product_id"], keep="last")
-            master = _safe_merge(master, rev_dedup, on=["order_id", "product_id"], label="reviews")
+            # Build the same synthetic key so we can join on order_item_id
+            reviews["order_item_id"] = (
+                reviews["order_id"].astype(str) + "_" + reviews["product_id"].astype(str)
+            )
+            # Drop columns already in master (order_id, product_id, customer_id) to
+            # avoid redundant _dim-suffixed duplicates after merge.
+            drop_from_reviews = [c for c in ["order_id", "product_id", "customer_id"]
+                                  if c in reviews.columns]
+            rev_dedup = reviews.drop(columns=drop_from_reviews).drop_duplicates(
+                subset=["order_item_id"], keep="last"
+            )
+            master = _safe_merge(master, rev_dedup, on="order_item_id", label="reviews")
             del rev_dedup
         else:
-            # Fallback to order_id if product_id is missing
+            # Fallback: no product_id in reviews — join at order level
             rev_dedup = reviews.drop_duplicates(subset=["order_id"], keep="last")
             master = _safe_merge(master, rev_dedup, on="order_id", label="reviews (order level)")
             del rev_dedup
@@ -309,16 +327,19 @@ def merge_tables(
     returns = _load(interim_dir, "returns.csv")
     if returns is not None:
         if all(c in returns.columns for c in ["order_id", "product_id"]):
-            # Group by order_id and product_id to sum return quantity just in case
-            ret_agg = returns.groupby(["order_id", "product_id"]).agg(
+            # Build the same synthetic key and aggregate at line-item level
+            returns["order_item_id"] = (
+                returns["order_id"].astype(str) + "_" + returns["product_id"].astype(str)
+            )
+            ret_agg = returns.groupby("order_item_id").agg(
                 return_quantity=("return_quantity", "sum"),
                 refund_amount=("refund_amount", "sum"),
                 return_reason=("return_reason", "first")
             ).reset_index()
-            master = _safe_merge(master, ret_agg, on=["order_id", "product_id"], label="returns")
+            master = _safe_merge(master, ret_agg, on="order_item_id", label="returns")
             del ret_agg
         else:
-            # Fallback to order_id
+            # Fallback: no product_id in returns — join at order level
             ret_agg = returns.groupby("order_id").agg(
                 return_quantity=("return_quantity", "sum"),
                 refund_amount=("refund_amount", "sum"),
@@ -342,29 +363,39 @@ def merge_tables(
     del promotions
     gc.collect()
 
-    # ── Join inventory ────────────────────────────────────────
+    # ── Join inventory (temporal, lag-safe) ───────────────────
     inventory = _load(interim_dir, "inventory.csv")
-    if inventory is not None and "product_id" in master.columns:
-        inv_agg = _agg_inventory(inventory)
+    if inventory is not None and "product_id" in master.columns and "order_date" in master.columns:
+        # Add temporary year/month keys from order_date to enable temporal matching.
+        order_dates = pd.to_datetime(master["order_date"], errors="coerce")
+        master["_order_year"]  = order_dates.dt.year
+        master["_order_month"] = order_dates.dt.month
+
+        inv_agg = _agg_inventory_temporal(inventory)
         del inventory
         gc.collect()
 
+        # Align inventory join keys to the temp columns we just added to master.
+        inv_agg = inv_agg.rename(columns={
+            "order_year":  "_order_year",
+            "order_month": "_order_month",
+        })
         master = _safe_merge(
             master, inv_agg,
-            on="product_id", label="inventory (latest snapshot)"
+            on=["product_id", "_order_year", "_order_month"],
+            label="inventory (temporal, lag-safe)"
         )
+        master = master.drop(columns=["_order_year", "_order_month"], errors="ignore")
         del inv_agg
         gc.collect()
     elif inventory is not None:
         del inventory
         gc.collect()
 
-    # ── Business Logic: Filter Canceled & Calculate Financials ────
-    if "order_status" in master.columns:
-        initial_count = len(master)
-        master = master[master["order_status"] != "cancelled"].copy()
-        if verbose:
-            print(f"  ✂  Filtered out {initial_count - len(master):,} 'cancelled' orders (Net Revenue focus).")
+    # ── Business Logic: Calculate Financials ─────────────────
+    # Cancelled orders are KEPT in master table so downstream models can learn
+    # cancellation patterns. Featurizer / trainer should filter by order_status
+    # when computing Revenue/COGS targets if needed.
 
     # Calculate line_cogs (The anchor for profit)
     if all(c in master.columns for c in ["quantity", "cogs"]):
@@ -425,7 +456,7 @@ def merge_tables(
     # ── Save master table ─────────────────────────────────────
     output_dir.mkdir(parents=True, exist_ok=True)
     save_path = output_dir / output_filename
-    master.to_csv(save_path, index=False, encoding="utf-8-sig")
+    master.to_csv(save_path, index=False, encoding="utf-8")
 
     if verbose:
         print(

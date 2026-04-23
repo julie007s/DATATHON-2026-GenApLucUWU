@@ -185,7 +185,7 @@ def run_featurization(
         "order_id":             "count",
         "is_promotion":         "sum",
         "delivery_days":        "mean",
-        "total_quantity":       "sum",
+        "quantity":             "sum",
         "line_revenue":         "sum",
         "line_cogs":            "sum",      # Deterministic Anchor
         "is_legacy":            "sum",      # For Legacy Intensity
@@ -206,7 +206,7 @@ def run_featurization(
         "order_id":             "daily_order_count",
         "is_promotion":         "daily_promo_order_count",
         "delivery_days":        "avg_delivery_days",
-        "total_quantity":       "daily_total_quantity",
+        "quantity":             "daily_total_quantity",
         "line_revenue":         "daily_total_item_revenue",
         "line_cogs":            "daily_total_cogs",
         "category_return_prob": "daily_return_risk_index",
@@ -231,7 +231,26 @@ def run_featurization(
         final_df[fill_cols] = final_df[fill_cols].fillna(0)
     else:
         final_df = daily_df
-
+    # ── 5b. Merge web traffic (daily, aggregated) ──────────────────────────────
+    web_traffic_path = raw_dir / "web_traffic.csv"
+    if web_traffic_path.exists():
+        wt = pd.read_csv(web_traffic_path, low_memory=False)
+        wt["Date"] = pd.to_datetime(wt["date"], errors="coerce").dt.normalize()
+        wt_daily = wt.groupby("Date").agg(
+            wt_sessions         =("sessions",                "sum"),
+            wt_unique_visitors  =("unique_visitors",         "sum"),
+            wt_page_views       =("page_views",              "sum"),
+            wt_bounce_rate      =("bounce_rate",             "mean"),
+            wt_avg_session_dur  =("avg_session_duration_sec","mean"),
+        ).reset_index()
+        final_df = final_df.merge(wt_daily, on="Date", how="left")
+        wt_base_cols = [c for c in wt_daily.columns if c != "Date"]
+        final_df[wt_base_cols] = final_df[wt_base_cols].fillna(0)
+        if verbose:
+            logger.info(
+                f"  📦 Merged daily web traffic "
+                f"({len(wt_daily)} days, {len(wt_base_cols)} metrics)"
+            )
     # ── 5c. Generate LAG features (non-leaky) ────────────────────────────────
     if verbose:
         logger.info("  Generating lag features (Seasonal & Multi-resolution)...")
@@ -251,7 +270,19 @@ def run_featurization(
         final_df[f"{col}_roll7"]  = final_df[col].shift(1).rolling(window=7, min_periods=1).mean()
         final_df[f"{col}_roll30"] = final_df[col].shift(1).rolling(window=30, min_periods=1).mean()
         final_df[f"{col}_roll90"] = final_df[col].shift(1).rolling(window=90, min_periods=1).mean()
-
+    # Drop raw wt_ columns — they are 0 for all test-period dates (web_traffic ends 2022).
+    # Their lag/rolling variants (wt_*_lag*, wt_*_roll*) remain as valid features.
+    wt_base = [
+        c for c in final_df.columns
+        if c.startswith("wt_") and not any(s in c for s in ["_lag", "_roll"])
+    ]
+    if wt_base:
+        final_df = final_df.drop(columns=wt_base)
+        if verbose:
+            logger.info(
+                f"  🗑  Dropped {len(wt_base)} raw wt_ columns; "
+                f"lag/roll variants retained for test-period validity."
+            )
     # ── 5d. Advanced Calendar Features & LUNAR TET WINDOW ───────────────────
     if verbose:
         logger.info("  Adding Advanced Calendar & Lunar Tet Window...")

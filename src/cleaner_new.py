@@ -269,7 +269,7 @@ def clean_and_save(
 
     interim_dir.mkdir(parents=True, exist_ok=True)
     out_path = interim_dir / filename
-    df_clean.to_csv(out_path, index=False, encoding="utf-8-sig")
+    df_clean.to_csv(out_path, index=False, encoding="utf-8")
 
     if verbose:
         _print_clean_report(report, out_path)
