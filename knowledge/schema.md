@@ -229,7 +229,7 @@
 | `order_id` | int | Không | FK → `orders.order_id` |
 | `product_id` | int | Không | FK → `products.product_id` (0 vi phạm FK) |
 | `quantity` | int | Không | Số lượng đặt mua |
-| `unit_price` | float | Không | Đơn giá sau khuyến mãi |
+| `unit_price` | float | Không | Đơn giá |
 | `discount_amount` | float | Không | Tổng tiền giảm |
 | `promo_id` | str | **Có** | 276,316 non-null (38.7%); FK → `promotions.promo_id` |
 | `promo_id_2` | str | **Có** | 206 non-null (0.03%); khuyến mãi thứ hai |

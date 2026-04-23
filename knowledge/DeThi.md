@@ -174,7 +174,7 @@ Bộ dữ liệu mô phỏng hoạt động của một doanh nghiệp thời tr
 | `order_id` | int | FK → `orders.order_id` |
 | `product_id` | int | FK → `products.product_id` |
 | `quantity` | int | Số lượng sản phẩm đặt mua |
-| `unit_price` | float | Đơn giá sau khi áp dụng khuyến mãi |
+| `unit_price` | float | Đơn giá |
 | `discount_amount` | float | Tổng số tiền giảm giá cho dòng sản phẩm này |
 | `promo_id` | str | FK → `promotions.promo_id` (nullable) |
 | `promo_id_2` | str | FK → `promotions.promo_id`, khuyến mãi thứ hai (nullable) |
@@ -319,7 +319,7 @@ Chỉ tồn tại cho đơn hàng có trạng thái `shipped`, `delivered` hoặ
 
 - A) 30 ngày
 - B) 90 ngày
-- C) 180 ngày
+- C) 144 ngày
 - D) 365 ngày
 
 ---
