@@ -1,0 +1,3 @@
+Requirement already satisfied: xgboost in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (3.2.0)
+Requirement already satisfied: numpy in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (from xgboost) (2.4.4)
+Requirement already satisfied: scipy in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (from xgboost) (1.17.1)
