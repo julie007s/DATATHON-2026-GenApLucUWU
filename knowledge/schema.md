@@ -229,7 +229,7 @@
 | `order_id` | int | Không | FK → `orders.order_id` |
 | `product_id` | int | Không | FK → `products.product_id` (0 vi phạm FK) |
 | `quantity` | int | Không | Số lượng đặt mua |
-| `unit_price` | float | Không | Đơn giá |
+| `unit_price` | float | Không | Đơn giá sau khuyến mãi |
 | `discount_amount` | float | Không | Tổng tiền giảm |
 | `promo_id` | str | **Có** | 276,316 non-null (38.7%); FK → `promotions.promo_id` |
 | `promo_id_2` | str | **Có** | 206 non-null (0.03%); khuyến mãi thứ hai |
@@ -479,3 +479,185 @@ returns ──────── orders (order_id FK)
 - Features có thể tạo từ: `orders`, `order_items`, `web_traffic`, `inventory`, `promotions`, `returns`
 - **Không được dùng** `Revenue`/`COGS` từ tập test làm feature
 - Cần đặt random seed để đảm bảo reproducibility
+
+---
+
+## Bảng Tổng hợp — `master_table.csv`
+
+> Được tạo bởi pipeline tại `data/output/master_table.csv`. Đây là bảng join dẹt (denormalized flat table) từ tất cả các nguồn, cấp độ dòng = **order_item** (714,669 dòng, 53 cột).
+
+**Thống kê tổng quan:**
+
+| Chỉ số | Giá trị |
+|--------|--------:|
+| Tổng số dòng | 714,669 |
+| Số cột | 53 |
+| Unique `order_id` | 646,945 |
+| Unique `product_id` | 1,598 |
+| Unique `customer_id` | 90,246 |
+
+---
+
+### Cấu trúc cột đầy đủ
+
+| Cột | Kiểu | Nullable | Nguồn gốc | Ghi chú |
+|-----|------|----------|-----------|---------|
+| `order_id` | int64 | Không | `orders` | FK đơn hàng |
+| `product_id` | int64 | Không | `order_items` | FK sản phẩm |
+| `quantity` | int64 | Không | `order_items` | Range [1, 8]; mean ≈ 4.5 |
+| `unit_price` | float64 | Không | `order_items` | Range [392.6, 43,060]; mean ≈ 5,115 |
+| `discount_amount` | float64 | Không | `order_items` | Range [0, 35,240]; mean ≈ 1,049 |
+| `promo_id` | str | Không | `order_items` | `"none"` khi không có KM |
+| `promo_id_2` | str | Không | `order_items` | `"none"` khi không có KM thứ hai |
+| `order_item_id` | str | Không | Derived | Format `{order_id}_{product_id}` |
+| `line_revenue` | float64 | Không | Derived | `quantity × unit_price − discount_amount`; range [389.7, 331,600]; mean ≈ 21,940 |
+| `order_date` | str | Không | `orders` | 2012-07-04 → 2022-12-31 |
+| `customer_id` | int64 | Không | `orders` | FK khách hàng |
+| `zip` | int64 | Không | `orders` | FK mã bưu chính |
+| `order_status` | str | Không | `orders` | Xem giá trị bên dưới |
+| `payment_method` | str | Không | `orders` | Xem giá trị bên dưới |
+| `device_type` | str | Không | `orders` | `mobile` / `desktop` / `tablet` |
+| `order_source` | str | Không | `orders` | Xem giá trị bên dưới |
+| `city` | str | Không | `customers` | Tên thành phố khách hàng |
+| `signup_date` | str | Không | `customers` | 2012-01-20 → 2022-12-31 |
+| `gender` | str | Không | `customers` | `Female` / `Male` / `Non-binary` |
+| `age_group` | str | Không | `customers` | 5 nhóm tuổi |
+| `acquisition_channel` | str | Không | `customers` | 6 kênh tiếp thị |
+| `region` | str | Không | `geography` | `EAST` / `CENTRAL` / `WEST` (uppercase sau join) |
+| `district` | str | Không | `geography` | Tên quận/huyện |
+| `product_name` | str | Không | `products` | Tên sản phẩm |
+| `category` | str | Không | `products` | `Streetwear` / `Outdoor` / `GenZ` / `Casual` |
+| `segment` | str | Không | `products` | 8 loại (xem bên dưới) |
+| `size` | str | Không | `products` | `S` / `M` / `L` / `XL` |
+| `color` | str | Không | `products` | Nhãn màu sản phẩm |
+| `price` | float64 | Không | `products` | Giá bán lẻ; range [440.4, 40,950]; mean ≈ 5,508 |
+| `cogs` | float64 | Không | `products` | Giá vốn; range [249.3, 38,900]; mean ≈ 4,408 |
+| `payment_value` | float64 | Không | `payments` | Tổng giá trị thanh toán; range [389.7, 331,600]; mean ≈ 23,940 |
+| `installments` | int64 | Không | `payments` | Số kỳ trả góp: 1/2/3/6/12 |
+| `ship_date` | str | **Có** | `shipments` | null cho 89,287 dòng (12.5%) — đơn chưa ship |
+| `delivery_date` | str | **Có** | `shipments` | null cho 89,287 dòng (12.5%); range 2012-07-06 → 2022-12-31 |
+| `shipping_fee` | float64 | Không | `shipments` | Range [0, 32]; mean ≈ 4.24 (`0` = miễn phí) |
+| `review_id` | str | Không | `reviews` | `"none"` khi không có review |
+| `rating` | float64 | Không | `reviews` | Range [0, 5]; mean ≈ 0.63 (`0` = không có review) |
+| `review_title` | str | **Có** | `reviews` | null cho 601,116 dòng (84.1%) |
+| `return_quantity` | float64 | Không | `returns` | Range [0, 11]; mean ≈ 0.15 (`0` = không trả) |
+| `refund_amount` | float64 | Không | `returns` | Range [0, 160,900]; mean ≈ 714.5 (`0` = không trả) |
+| `return_reason` | str | **Có** | `returns` | null cho 674,730 dòng (94.4%) |
+| `promo_type` | str | **Có** | `promotions` | null cho 438,353 dòng (61.3%); `percentage` / `fixed` |
+| `discount_value` | float64 | **Có** | `promotions` | null cho 438,353 dòng (61.3%); range [10, 50]; mean ≈ 17.97 |
+| `promo_channel` | str | **Có** | `promotions` | null cho 438,353 dòng (61.3%); xem giá trị bên dưới |
+| `min_order_value` | float64 | **Có** | `promotions` | null cho 438,353 dòng (61.3%); range [0, 200,000] |
+| `stock_on_hand` | float64 | **Có** | `inventory` | null cho 19,512 dòng (2.7%); range [3, 2,657]; mean ≈ 422.6 |
+| `fill_rate` | float64 | **Có** | `inventory` | null cho 19,512 dòng (2.7%); range [0.067, 1.0]; mean ≈ 0.951 |
+| `sell_through_rate` | float64 | **Có** | `inventory` | null cho 19,512 dòng (2.7%); range [0.0004, 0.853]; mean ≈ 0.178 |
+| `stockout_flag` | float64 | **Có** | `inventory` | null cho 19,512 dòng (2.7%); binary 0/1 |
+| `stockout_days` | float64 | **Có** | `inventory` | null cho 19,512 dòng (2.7%); range [0, 28]; mean ≈ 1.46 |
+| `line_cogs` | float64 | Không | Derived | `quantity × cogs`; range [346.3, 311,200]; mean ≈ 19,820 |
+| `is_legacy` | int64 | Không | Derived | 1 = đơn cũ (531,554 dòng / 74.4%); 0 = đơn mới (183,115 dòng / 25.6%) |
+| `category_return_prob` | float64 | Không | Derived | Xác suất trả theo category; range [0.0542, 0.0573] |
+
+---
+
+### Giá trị categorical trong master_table
+
+**`order_status`:**
+| Giá trị | Số dòng |
+|---------|--------:|
+| `delivered` | 570,887 |
+| `cancelled` | 65,673 |
+| `returned` | 40,034 |
+| `shipped` | 15,094 |
+| `paid` | 14,987 |
+| `created` | 7,994 |
+
+**`payment_method`:**
+| Giá trị | Số dòng |
+|---------|--------:|
+| `credit_card` | 393,421 |
+| `paypal` | 107,230 |
+| `cod` | 106,965 |
+| `apple_pay` | 71,510 |
+| `bank_transfer` | 35,543 |
+
+**`order_source`:**
+| Giá trị | Số dòng |
+|---------|--------:|
+| `organic_search` | 200,429 |
+| `paid_search` | 156,500 |
+| `social_media` | 143,306 |
+| `email_campaign` | 85,849 |
+| `referral` | 71,256 |
+| `direct` | 57,329 |
+
+**`region`** (uppercase trong master_table, khác với `geography.csv`):
+| Giá trị | Số dòng |
+|---------|--------:|
+| `EAST` | 321,293 |
+| `CENTRAL` | 201,342 |
+| `WEST` | 192,034 |
+
+**`category`:**
+| Giá trị | Số dòng |
+|---------|--------:|
+| `Streetwear` | 393,533 |
+| `Outdoor` | 259,986 |
+| `GenZ` | 37,159 |
+| `Casual` | 23,991 |
+
+**`segment`:**
+| Giá trị | Số dòng |
+|---------|--------:|
+| `Activewear` | 230,375 |
+| `Everyday` | 182,533 |
+| `Balanced` | 103,333 |
+| `Performance` | 96,730 |
+| `Trendy` | 37,159 |
+| `Premium` | 31,032 |
+| `All-weather` | 22,570 |
+| `Standard` | 10,937 |
+
+**`size`:**
+| Giá trị | Số dòng |
+|---------|--------:|
+| `XL` | 193,025 |
+| `M` | 176,428 |
+| `L` | 173,174 |
+| `S` | 172,042 |
+
+**`promo_type`** (61.3% null):
+| Giá trị | Số dòng |
+|---------|--------:|
+| `percentage` | 255,366 |
+| `fixed` | 20,950 |
+
+**`promo_channel`** (61.3% null):
+| Giá trị | Số dòng |
+|---------|--------:|
+| `all_channels` | 127,687 |
+| `online` | 66,171 |
+| `email` | 41,576 |
+| `social_media` | 31,977 |
+| `in_store` | 8,905 |
+
+**`return_reason`** (94.4% null):
+| Giá trị | Số dòng |
+|---------|--------:|
+| `wrong_size` | 13,968 |
+| `defective` | 8,020 |
+| `not_as_described` | 7,034 |
+| `changed_mind` | 6,931 |
+| `late_delivery` | 3,986 |
+
+---
+
+### Lưu ý quan trọng về master_table
+
+1. **Cấp độ dòng là order_item**, không phải order — khi tính revenue/cogs cần dùng `line_revenue`/`line_cogs`, không phải `payment_value`.
+2. **`region` bị uppercase** trong quá trình join: `EAST`/`CENTRAL`/`WEST` thay vì `East`/`Central`/`West` trong `geography.csv`.
+3. **`promo_id` và `promo_id_2`** được fill bằng chuỗi `"none"` (không phải `NaN`) khi không có khuyến mãi.
+4. **`review_id`** được fill bằng `"none"` khi không có review; `rating = 0` cho items không được đánh giá.
+5. **`is_legacy`**: `1` = đơn hàng cũ (74.4%), `0` = đơn hàng mới (25.6%) — cột derived từ logic pipeline.
+6. **`category_return_prob`**: Xác suất trả hàng theo category (range rất hẹp: 0.054–0.057), được tính theo category từ dữ liệu lịch sử.
+7. **Unique `product_id` = 1,598** (thấp hơn 2,412 trong `products.csv`) — chỉ các sản phẩm thực sự được mua mới xuất hiện.
+8. **Unique `customer_id` = 90,246** (thấp hơn 121,930 trong `customers.csv`) — chỉ khách hàng đã đặt hàng.
+9. **`ship_date`/`delivery_date` null = 12.5%** tương ứng với đơn `cancelled`/`paid`/`created` chưa được giao.
