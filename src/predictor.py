@@ -63,7 +63,10 @@ def generate_submission(
     features_numeric = [c for c in candidate_features if pd.api.types.is_numeric_dtype(features_df[c])]
 
     # Anti-Leakage Filter
-    safe_patterns = ["_lag", "_roll", "day_", "week_", "month_", "year_", "is_holiday", "days_until_holiday"]
+    safe_patterns = [
+        "_lag", "_roll", "day_", "week_", "month_", "year_", 
+        "is_holiday", "days_until_holiday", "covid_intensity"
+    ]
     feature_cols = [
         c for c in features_numeric 
         if any(pat in c for pat in safe_patterns)
@@ -86,7 +89,7 @@ def generate_submission(
     # Identify base columns (those that have lag/roll versions)
     # This is critical to recompute lags/rolls correctly
     all_cols = features_df.columns.tolist()
-    base_cols = [c for c in all_cols if any(f"{c}_{sfx}" in all_cols for sfx in ["lag7", "lag30", "lag365", "roll7", "roll30", "roll90"])]
+    base_cols = [c for c in all_cols if any(f"{c}_{sfx}" in all_cols for sfx in ["lag7", "lag30", "lag365", "roll7", "roll30"])]
     
     all_df = all_dates.merge(features_df, on="Date", how="left")
     all_df = all_df.sort_values("Date").reset_index(drop=True)
@@ -118,11 +121,25 @@ def generate_submission(
             return (min(future) - dt).days if future else 365
         all_df["days_until_holiday"] = all_df.index.to_series().apply(_get_countdown)
 
+    if "covid_intensity" in feature_cols:
+        def _calc_covid_intensity(dt):
+            if dt < pd.Timestamp('2020-02-01'): return 0.0
+            elif dt < pd.Timestamp('2021-05-01'):
+                total_days = (pd.Timestamp('2021-05-01') - pd.Timestamp('2020-02-01')).days
+                days = (dt - pd.Timestamp('2020-02-01')).days
+                return 0.7 * (days / total_days)
+            elif dt <= pd.Timestamp('2021-09-30'): return 1.0
+            else:
+                days_passed = (dt - pd.Timestamp('2021-09-30')).days
+                lambda_ = np.log(1/0.1) / ((pd.Timestamp('2023-01-01') - pd.Timestamp('2021-09-30')).days)
+                return float(np.exp(-lambda_ * days_passed))
+        all_df["covid_intensity"] = all_df.index.to_series().apply(_calc_covid_intensity)
+
     # ── 5. Recursive Prediction Loop ──────────────────────────────────────────
     test_dates_only = [d for d in all_df.index if d > train_max]
     
     # source_vars are the 'parents' of the lag/roll features
-    source_vars = [c for c in all_df.columns if any(f"{c}_{sfx}" in feature_cols for sfx in ["lag7", "lag30", "lag365", "roll7", "roll30", "roll90"])]
+    source_vars = [c for c in all_df.columns if any(f"{c}_{sfx}" in feature_cols for sfx in ["lag7", "lag30", "lag365", "roll7", "roll30"])]
 
     for t_date in test_dates_only:
         # Time anchors
@@ -149,10 +166,6 @@ def generate_submission(
             if f"{var}_roll30" in feature_cols:
                 p30 = [t_date - pd.Timedelta(days=i) for i in range(1, 31)]
                 all_df.loc[t_date, f"{var}_roll30"] = all_df.loc[[d for d in p30 if d in all_df.index], var].mean()
-
-            if f"{var}_roll90" in feature_cols:
-                p90 = [t_date - pd.Timedelta(days=i) for i in range(1, 91)]
-                all_df.loc[t_date, f"{var}_roll90"] = all_df.loc[[d for d in p90 if d in all_df.index], var].mean()
 
         # 5b. Predict for current date
         X_t = all_df.loc[[t_date], feature_cols].fillna(0)

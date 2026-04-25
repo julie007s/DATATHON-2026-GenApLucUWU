@@ -17,6 +17,7 @@ def _train_single_target(
     X: pd.DataFrame,
     y: pd.Series,
     target_name: str,
+    weights: pd.Series = None,
     n_splits: int = 5,
     verbose: bool = True,
 ) -> xgb.XGBRegressor:
@@ -30,6 +31,7 @@ def _train_single_target(
     for fold, (train_idx, val_idx) in enumerate(tscv.split(X)):
         X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+        w_train = weights.iloc[train_idx] if weights is not None else None
 
         model = xgb.XGBRegressor(
             n_estimators=1000,
@@ -41,7 +43,7 @@ def _train_single_target(
             random_state=42,
             early_stopping_rounds=50,
         )
-        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+        model.fit(X_train, y_train, sample_weight=w_train, eval_set=[(X_val, y_val)], verbose=False)
 
         preds = model.predict(X_val)
         mae  = mean_absolute_error(y_val, preds)
@@ -69,7 +71,7 @@ def _train_single_target(
         max_depth=5,
         random_state=42,
     )
-    final_model.fit(X, y)
+    final_model.fit(X, y, sample_weight=weights)
     return final_model
 
 
@@ -111,7 +113,11 @@ def train_revenue_model(
     # Safe features are: Lags, Rolling windows, and Calendar/Holiday features.
     # Unsafe features are: Lag-0 aggregates (daily_order_count, daily_total_item_revenue, etc.)
     
-    safe_patterns = ["_lag", "_roll", "day_", "week_", "month_", "year_", "is_holiday", "days_until_holiday"]
+    safe_patterns = [
+        "_lag", "_roll", "day_", "week_", "month_", "year_", 
+        "is_holiday", "days_until_holiday",
+        "covid_intensity"  # Deterministic & safe for current day
+    ]
     features = [
         c for c in features_numeric 
         if any(pat in c for pat in safe_patterns)
@@ -141,6 +147,7 @@ def train_revenue_model(
         logger.info(f"     Training days : {len(train_df)}")
 
     X = train_df[features]
+    weights = train_df["sample_weight"] if "sample_weight" in train_df.columns else None
 
     # ── 3a. Train Revenue Model ───────────────────────────────────────────────
     if verbose:
@@ -150,7 +157,7 @@ def train_revenue_model(
         raise ValueError("Revenue column missing or all-null in feature table.")
 
     y_revenue = train_df["Revenue"]
-    revenue_model = _train_single_target(X, y_revenue, "Revenue", verbose=verbose)
+    revenue_model = _train_single_target(X, y_revenue, "Revenue", weights=weights, verbose=verbose)
 
     # ── 3b. Train COGS Model (Fix: Audit Issue #3) ────────────────────────────
     if verbose:
@@ -158,7 +165,7 @@ def train_revenue_model(
 
     if "COGS" in train_df.columns and not train_df["COGS"].isna().all():
         y_cogs = train_df["COGS"]
-        cogs_model = _train_single_target(X, y_cogs, "COGS", verbose=verbose)
+        cogs_model = _train_single_target(X, y_cogs, "COGS", weights=weights, verbose=verbose)
         has_cogs_model = True
     else:
         logger.warning("  COGS column missing or all-null — COGS model not trained.")

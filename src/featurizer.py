@@ -122,43 +122,39 @@ def add_market_era_features(df: pd.DataFrame, date_col: str = "order_date") -> p
     df = df.copy()
     df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
 
-    def assign_market_era(date):
-        if pd.isna(date):
-            return np.nan
-        if date < pd.Timestamp('2019-01-01'):
-            return 0  # Pre-Covid
-        elif date < pd.Timestamp('2022-01-01'):
-            return 1  # Covid
-        else:
-            return 2  # New Normal
 
     def calc_covid_intensity(date):
         if pd.isna(date):
             return np.nan
-        if date < pd.Timestamp('2019-01-01'):
+        if date < pd.Timestamp('2020-02-01'):
             return 0.0
+        elif date < pd.Timestamp('2021-05-01'):
+            # Gradual rise during early waves
+            total_days = (pd.Timestamp('2021-05-01') - pd.Timestamp('2020-02-01')).days
+            days = (date - pd.Timestamp('2020-02-01')).days
+            return 0.7 * (days / total_days)
         elif date <= pd.Timestamp('2021-09-30'):
-            total_days = (pd.Timestamp('2021-09-30') - pd.Timestamp('2019-01-01')).days
-            days = (date - pd.Timestamp('2019-01-01')).days
-            return min(1.0, max(0.0, days / total_days))
+            # Delta Wave Spike (High intensity)
+            return 1.0
         else:
+            # Post-Delta Decay
             days_passed = (date - pd.Timestamp('2021-09-30')).days
-            lambda_ = np.log(1/0.12) / ((pd.Timestamp('2023-01-01') - pd.Timestamp('2021-09-30')).days)
+            # Target 0.1 intensity by start of 2023
+            lambda_ = np.log(1/0.1) / ((pd.Timestamp('2023-01-01') - pd.Timestamp('2021-09-30')).days)
             return float(np.exp(-lambda_ * days_passed))
 
     def assign_sample_weight(date):
         if pd.isna(date):
             return np.nan
-        if date < pd.Timestamp('2019-01-01'):
-            return 0.5
+        if date < pd.Timestamp('2020-02-01'):
+            return 0.8  # Pre-Covid: Good but old
         elif date < pd.Timestamp('2022-01-01'):
-            return 0.3
+            return 0.2  # Covid Peak: High noise, low reliability
         elif date < pd.Timestamp('2023-01-01'):
-            return 2.0
+            return 2.5  # 2022: Gold standard for 2023 forecasting
         else:
             return 1.0
 
-    df['market_era'] = df[date_col].apply(assign_market_era)
     df['covid_intensity'] = df[date_col].apply(calc_covid_intensity)
     df['sample_weight'] = df[date_col].apply(assign_sample_weight)
     return df
@@ -240,6 +236,12 @@ def run_featurization(
     df = df.sort_values("Date").reset_index(drop=True)  # Sort before groupby (critical for Lag)
 
     # ── Pre-groupby: create boolean helper columns for ratio features ─────────
+    # Legacy vs New Revenue helpers
+    if "is_legacy" in df.columns and "line_revenue" in df.columns:
+        df["_legacy_rev"] = df["is_legacy"] * df["line_revenue"]
+        df["_new_rev"]    = (1 - df["is_legacy"]) * df["line_revenue"]
+        df["_new_orders"] = (1 - df["is_legacy"]) # For new customer AOV
+
     # Device type: mobile ratio
     if "device_type" in df.columns:
         df["_is_mobile"] = (df["device_type"].astype(str).str.lower() == "mobile").astype(int)
@@ -268,6 +270,10 @@ def run_featurization(
         "line_cogs":            "sum",      # Deterministic Anchor
         "is_legacy":            "sum",      # For Legacy Intensity
         "category_return_prob": "mean",     # Weighted risk
+        # Legacy Optimization
+        "_legacy_rev":          "sum",
+        "_new_rev":             "sum",
+        "_new_orders":          "sum",
         # Group 1: Inventory Signals
         "stockout_flag":        "mean",     # daily_stockout_rate (proportion)
         "fill_rate":            "mean",     # daily_avg_fill_rate
@@ -305,7 +311,15 @@ def run_featurization(
     # --- FEATURE: Legacy Intensity ---
     if "is_legacy" in daily_df.columns:
         daily_df["legacy_intensity"] = daily_df["is_legacy"] / daily_df["daily_order_count"]
-        daily_df.drop(columns=["is_legacy"], inplace=True)
+        # Optimized Legacy Features
+        if "_legacy_rev" in daily_df.columns:
+            daily_df["legacy_revenue_share"] = daily_df["_legacy_rev"] / daily_df["daily_total_item_revenue"].replace(0, np.nan)
+            daily_df["legacy_aov"] = daily_df["_legacy_rev"] / daily_df["is_legacy"].replace(0, np.nan)
+            
+        if "_new_rev" in daily_df.columns and "_new_orders" in daily_df.columns:
+            daily_df["new_customer_aov"] = daily_df["_new_rev"] / daily_df["_new_orders"].replace(0, np.nan)
+            
+        daily_df.drop(columns=["is_legacy", "_legacy_rev", "_new_rev", "_new_orders"], inplace=True)
 
     # --- GROUP 2: Discount Depth (daily_discount_depth) ---
     # = Sum(discount_amount) / Sum(unit_price * quantity) — proportion of revenue given away
@@ -388,7 +402,7 @@ def run_featurization(
     # Only lag numeric features that aren't target variables
     lag_source_cols = [
         c for c in final_df.columns
-        if c not in ["Date", "Revenue", "COGS"]
+        if c not in ["Date", "Revenue", "COGS", "sample_weight"]
         and pd.api.types.is_numeric_dtype(final_df[c])
     ]
 
@@ -399,7 +413,6 @@ def run_featurization(
         
         final_df[f"{col}_roll7"]  = final_df[col].shift(1).rolling(window=7, min_periods=1).mean()
         final_df[f"{col}_roll30"] = final_df[col].shift(1).rolling(window=30, min_periods=1).mean()
-        final_df[f"{col}_roll90"] = final_df[col].shift(1).rolling(window=90, min_periods=1).mean()
     # Drop raw wt_ columns — they are 0 for all test-period dates (web_traffic ends 2022).
     # Their lag/rolling variants (wt_*_lag*, wt_*_roll*) remain as valid features.
     wt_base = [
