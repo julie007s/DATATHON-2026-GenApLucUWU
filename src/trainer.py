@@ -1,12 +1,16 @@
-import pandas as pd
-import numpy as np
-import xgboost as xgb
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import json
+from pathlib import Path
+
 import joblib
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
-from pathlib import Path
+import xgboost as xgb
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import TimeSeriesSplit
+
+from src.feature_contract import get_model_feature_columns
 from src.logger import logger
 
 # 1. Reproducibility: Set Random Seed
@@ -46,9 +50,9 @@ def _train_single_target(
         model.fit(X_train, y_train, sample_weight=w_train, eval_set=[(X_val, y_val)], verbose=False)
 
         preds = model.predict(X_val)
-        mae  = mean_absolute_error(y_val, preds)
+        mae = mean_absolute_error(y_val, preds)
         rmse = np.sqrt(mean_squared_error(y_val, preds))
-        r2   = r2_score(y_val, preds)
+        r2 = r2_score(y_val, preds)
         scores.append(mae)
 
         if verbose:
@@ -64,7 +68,6 @@ def _train_single_target(
             f"Avg MAE: {avg_mae:,.2f}"
         )
 
-    # Final model trained on ALL data
     final_model = xgb.XGBRegressor(
         n_estimators=500,
         learning_rate=0.05,
@@ -75,6 +78,12 @@ def _train_single_target(
     return final_model
 
 
+def _save_feature_metadata(model_output_dir: Path, features: list[str]) -> Path:
+    metadata_path = model_output_dir / "model_features.json"
+    metadata_path.write_text(json.dumps({"features": features}, indent=2), encoding="utf-8")
+    return metadata_path
+
+
 def train_revenue_model(
     feature_table_path: Path,
     model_output_dir: Path,
@@ -83,86 +92,58 @@ def train_revenue_model(
     verbose: bool = True,
 ):
     """
-    Trains TWO XGBoost Regressors:
-      1. Revenue model  → xgboost_revenue_model.joblib
-      2. COGS model     → xgboost_cogs_model.joblib   (Fix: Audit Issue #3)
-
-    Both targets come from sales.csv (Revenue and COGS columns).
-    Uses TimeSeriesSplit for validation.
+    Train revenue and COGS XGBoost regressors using leakage-safe features only.
     """
     if verbose:
         logger.info("  Starting Model Training (XGBoost — Revenue + COGS)...")
 
-    # 2. Load Data
     if not feature_table_path.exists():
         raise FileNotFoundError(f"Feature table not found at {feature_table_path}")
 
     df = pd.read_parquet(feature_table_path, engine="pyarrow")
     df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values("Date")  # Chronological order for TimeSeriesSplit
+    df = df.sort_values("Date")
 
-    # Identify candidate features
-    drop_cols = ["Date", "Revenue", "COGS"]
-    all_features = [c for c in df.columns if c not in drop_cols]
-    
-    # Filter only numeric types
-    features_numeric = [c for c in all_features if pd.api.types.is_numeric_dtype(df[c])]
-
-    # --- ANTI-LEAKAGE FILTER ---
-    # We must ONLY use features that are available at the START of the day.
-    # Safe features are: Lags, Rolling windows, and Calendar/Holiday features.
-    # Unsafe features are: Lag-0 aggregates (daily_order_count, daily_total_item_revenue, etc.)
-    
-    safe_patterns = [
-        "_lag", "_roll", "day_", "week_", "month_", "year_", 
-        "is_holiday", "days_until_holiday",
-        "covid_intensity"  # Deterministic & safe for current day
-    ]
-    features = [
-        c for c in features_numeric 
-        if any(pat in c for pat in safe_patterns)
-    ]
+    features = get_model_feature_columns(df)
+    if not features:
+        raise ValueError("No leakage-safe model features were found in featured_table.parquet")
 
     if verbose:
-        logger.info(f"     Feature count (After Leakage Filter): {len(features)}")
+        logger.info(f"     Feature count (leakage-safe): {len(features)}")
         logger.info(f"     Selected Features: {features}")
 
-    if verbose:
-        logger.info(f"     Feature count : {len(features)}")
-        logger.info(f"     Features      : {features}")
-
-    # Split into train / holdout if train_until is given
     if train_until:
         if verbose:
             logger.info(f"  Isolating data: Training strictly before {train_until}")
         train_df = df[df["Date"] < train_until].copy()
-        test_df  = df[df["Date"] >= train_until].copy()
+        test_df = df[df["Date"] >= train_until].copy()
     else:
         if verbose:
             logger.info("  Full Training Mode: Using all available data.")
         train_df = df.copy()
-        test_df  = pd.DataFrame()
+        test_df = pd.DataFrame()
 
     if verbose:
         logger.info(f"     Training days : {len(train_df)}")
 
-    X = train_df[features]
+    X = train_df[features].fillna(0)
     weights = train_df["sample_weight"] if "sample_weight" in train_df.columns else None
 
-    # ── 3a. Train Revenue Model ───────────────────────────────────────────────
-    if verbose:
-        logger.info("  Training Revenue model...")
+    if verbose and weights is not None:
+        logger.info(
+            f"     Sample weight range: {weights.min():.3f} — {weights.max():.3f}"
+        )
 
     if "Revenue" not in train_df.columns or train_df["Revenue"].isna().all():
         raise ValueError("Revenue column missing or all-null in feature table.")
 
+    if verbose:
+        logger.info("  Training Revenue model...")
     y_revenue = train_df["Revenue"]
     revenue_model = _train_single_target(X, y_revenue, "Revenue", weights=weights, verbose=verbose)
 
-    # ── 3b. Train COGS Model (Fix: Audit Issue #3) ────────────────────────────
     if verbose:
         logger.info("  Training COGS model...")
-
     if "COGS" in train_df.columns and not train_df["COGS"].isna().all():
         y_cogs = train_df["COGS"]
         cogs_model = _train_single_target(X, y_cogs, "COGS", weights=weights, verbose=verbose)
@@ -172,27 +153,24 @@ def train_revenue_model(
         cogs_model = None
         has_cogs_model = False
 
-    # ── 4. Holdout Evaluation ─────────────────────────────────────────────────
     if not test_df.empty:
-        X_test = test_df[features]
-
+        X_test = test_df[features].fillna(0)
         for target_name, model in [("Revenue", revenue_model), ("COGS", cogs_model)]:
             if model is None:
                 continue
             if target_name not in test_df.columns or test_df[target_name].isna().all():
                 continue
             y_test = test_df[target_name]
-            preds  = model.predict(X_test)
-            mae    = mean_absolute_error(y_test, preds)
-            rmse   = np.sqrt(mean_squared_error(y_test, preds))
-            r2     = r2_score(y_test, preds)
+            preds = model.predict(X_test)
+            mae = mean_absolute_error(y_test, preds)
+            rmse = np.sqrt(mean_squared_error(y_test, preds))
+            r2 = r2_score(y_test, preds)
             if verbose:
                 logger.info(
                     f"  HOLDOUT [{target_name}] | "
                     f"MAE: {mae:,.2f} | RMSE: {rmse:,.2f} | R2: {r2:.4f}"
                 )
 
-    # ── 5. Save Models ────────────────────────────────────────────────────────
     model_output_dir.mkdir(parents=True, exist_ok=True)
 
     revenue_path = model_output_dir / "xgboost_revenue_model.joblib"
@@ -206,10 +184,13 @@ def train_revenue_model(
         if verbose:
             logger.info(f"  COGS model saved to: {cogs_path}")
 
-    # ── 6. Feature Importance (Revenue) ──────────────────────────────────────
+    metadata_path = _save_feature_metadata(model_output_dir, features)
+    if verbose:
+        logger.info(f"  Feature metadata saved to: {metadata_path}")
+
     plt.figure(figsize=(10, 6))
     importance_df = pd.DataFrame({
-        "Feature":    features,
+        "Feature": features,
         "Importance": revenue_model.feature_importances_,
     }).sort_values("Importance", ascending=False)
 
