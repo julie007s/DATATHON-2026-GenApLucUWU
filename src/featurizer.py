@@ -104,6 +104,65 @@ def _apply_features(df: pd.DataFrame, rules: list[dict], scope: str) -> pd.DataF
 # Main entry point
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Add market_era, covid_intensity, sample_weight features
+# ──────────────────────────────────────────────────────────────────────────────
+def add_market_era_features(df: pd.DataFrame, date_col: str = "order_date") -> pd.DataFrame:
+    """
+    Add market_era (0/1/2), covid_intensity (0-1), sample_weight columns to DataFrame.
+    Args:
+        df: DataFrame with a datetime column (default 'order_date')
+        date_col: Name of the datetime column
+    Returns:
+        DataFrame with new columns added
+    """
+    if date_col not in df.columns:
+        raise ValueError(f"{date_col} not found in DataFrame")
+    # Ensure datetime
+    df = df.copy()
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+
+    def assign_market_era(date):
+        if pd.isna(date):
+            return np.nan
+        if date < pd.Timestamp('2019-01-01'):
+            return 0  # Pre-Covid
+        elif date < pd.Timestamp('2022-01-01'):
+            return 1  # Covid
+        else:
+            return 2  # New Normal
+
+    def calc_covid_intensity(date):
+        if pd.isna(date):
+            return np.nan
+        if date < pd.Timestamp('2019-01-01'):
+            return 0.0
+        elif date <= pd.Timestamp('2021-09-30'):
+            total_days = (pd.Timestamp('2021-09-30') - pd.Timestamp('2019-01-01')).days
+            days = (date - pd.Timestamp('2019-01-01')).days
+            return min(1.0, max(0.0, days / total_days))
+        else:
+            days_passed = (date - pd.Timestamp('2021-09-30')).days
+            lambda_ = np.log(1/0.12) / ((pd.Timestamp('2023-01-01') - pd.Timestamp('2021-09-30')).days)
+            return float(np.exp(-lambda_ * days_passed))
+
+    def assign_sample_weight(date):
+        if pd.isna(date):
+            return np.nan
+        if date < pd.Timestamp('2019-01-01'):
+            return 0.5
+        elif date < pd.Timestamp('2022-01-01'):
+            return 0.3
+        elif date < pd.Timestamp('2023-01-01'):
+            return 2.0
+        else:
+            return 1.0
+
+    df['market_era'] = df[date_col].apply(assign_market_era)
+    df['covid_intensity'] = df[date_col].apply(calc_covid_intensity)
+    df['sample_weight'] = df[date_col].apply(assign_sample_weight)
+    return df
+
 def run_featurization(
     master_table_path: Path,
     raw_dir: Path,
@@ -180,6 +239,25 @@ def run_featurization(
     df["Date"] = df["order_date"].dt.normalize()
     df = df.sort_values("Date").reset_index(drop=True)  # Sort before groupby (critical for Lag)
 
+    # ── Pre-groupby: create boolean helper columns for ratio features ─────────
+    # Device type: mobile ratio
+    if "device_type" in df.columns:
+        df["_is_mobile"] = (df["device_type"].astype(str).str.lower() == "mobile").astype(int)
+    # Payment method: COD ratio
+    if "payment_method" in df.columns:
+        df["_is_cod"] = (df["payment_method"].astype(str).str.lower().str.contains("cod|cash", na=False)).astype(int)
+    # Discount numerator: discount_amount * quantity (for discount depth)
+    if "discount_amount" in df.columns and "quantity" in df.columns:
+        df["_discount_total"] = (
+            pd.to_numeric(df["discount_amount"], errors="coerce").fillna(0)
+        )
+    # Discount denominator: price * quantity (gross revenue before discount)
+    if "unit_price" in df.columns and "quantity" in df.columns:
+        df["_gross_revenue"] = (
+            pd.to_numeric(df["unit_price"], errors="coerce").fillna(0) *
+            pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+        )
+
     # Dynamic aggregation spec
     base_agg: dict = {
         "order_id":             "count",
@@ -190,13 +268,22 @@ def run_featurization(
         "line_cogs":            "sum",      # Deterministic Anchor
         "is_legacy":            "sum",      # For Legacy Intensity
         "category_return_prob": "mean",     # Weighted risk
+        # Group 1: Inventory Signals
+        "stockout_flag":        "mean",     # daily_stockout_rate (proportion)
+        "fill_rate":            "mean",     # daily_avg_fill_rate
+        # Group 2: Discount depth helpers
+        "_discount_total":      "sum",
+        "_gross_revenue":       "sum",
+        # Group 3: Device & Payment ratio helpers
+        "_is_mobile":           "sum",
+        "_is_cod":              "sum",
     }
-    
+
     # Automatically aggregate any target-encoded columns
     for col in df.columns:
         if col.endswith("_encoded"):
             base_agg[col] = "mean"
-            
+
     agg_spec = {k: v for k, v in base_agg.items() if k in df.columns}
 
     daily_df = df.groupby("Date").agg(agg_spec).reset_index()
@@ -210,13 +297,47 @@ def run_featurization(
         "line_revenue":         "daily_total_item_revenue",
         "line_cogs":            "daily_total_cogs",
         "category_return_prob": "daily_return_risk_index",
+        "stockout_flag":        "daily_stockout_rate",
+        "fill_rate":            "daily_avg_fill_rate",
     }
     daily_df = daily_df.rename(columns={k: v for k, v in rename_map.items() if k in daily_df.columns})
 
-    # --- FEATURE: Legacy Intensity (Nhiệt lòng trung thành) ---
+    # --- FEATURE: Legacy Intensity ---
     if "is_legacy" in daily_df.columns:
         daily_df["legacy_intensity"] = daily_df["is_legacy"] / daily_df["daily_order_count"]
         daily_df.drop(columns=["is_legacy"], inplace=True)
+
+    # --- GROUP 2: Discount Depth (daily_discount_depth) ---
+    # = Sum(discount_amount) / Sum(unit_price * quantity) — proportion of revenue given away
+    if "_discount_total" in daily_df.columns and "_gross_revenue" in daily_df.columns:
+        daily_df["daily_discount_depth"] = (
+            daily_df["_discount_total"] / daily_df["_gross_revenue"].replace(0, np.nan)
+        ).fillna(0).clip(0, 1)
+        daily_df.drop(columns=["_discount_total", "_gross_revenue"], inplace=True)
+
+    # --- GROUP 3: Device & Payment Ratios ---
+    if "_is_mobile" in daily_df.columns:
+        daily_df["daily_mobile_ratio"] = (
+            daily_df["_is_mobile"] / daily_df["daily_order_count"].replace(0, np.nan)
+        ).fillna(0)
+        daily_df.drop(columns=["_is_mobile"], inplace=True)
+    if "_is_cod" in daily_df.columns:
+        daily_df["daily_cod_ratio"] = (
+            daily_df["_is_cod"] / daily_df["daily_order_count"].replace(0, np.nan)
+        ).fillna(0)
+        daily_df.drop(columns=["_is_cod"], inplace=True)
+
+    # --- GROUP 4: AOV & UPT (must be computed AFTER groupby) ---
+    # AOV = Revenue / orders  |  UPT = Units / orders
+    # XGBoost cannot learn divisions on its own — pre-computing is critical.
+    if "daily_total_item_revenue" in daily_df.columns:
+        daily_df["aov"] = (
+            daily_df["daily_total_item_revenue"] / daily_df["daily_order_count"].replace(0, np.nan)
+        ).fillna(0)
+    if "daily_total_quantity" in daily_df.columns:
+        daily_df["upt"] = (
+            daily_df["daily_total_quantity"] / daily_df["daily_order_count"].replace(0, np.nan)
+        ).fillna(0)
 
     # ── 5. Merge with target (sales.csv) ────────────────────────────────────
     sales_path = raw_dir / "sales.csv"
@@ -251,7 +372,16 @@ def run_featurization(
                 f"  📦 Merged daily web traffic "
                 f"({len(wt_daily)} days, {len(wt_base_cols)} metrics)"
             )
-    # ── 5c. Generate LAG features (non-leaky) ────────────────────────────────
+
+    # ── 5c. COVID / Market-Era Features ─────────────────────────────────────
+    # market_era (0=Pre-Covid, 1=Covid, 2=New Normal)
+    # covid_intensity (0-1 continuous signal)
+    # sample_weight (used by trainer to up-weight recent data)
+    if verbose:
+        logger.info("  Adding COVID & Market-Era features (market_era, covid_intensity, sample_weight)...")
+    final_df = add_market_era_features(final_df, date_col="Date")
+
+    # ── 5d. Generate LAG features (non-leaky) ────────────────────────────────
     if verbose:
         logger.info("  Generating lag features (Seasonal & Multi-resolution)...")
 
