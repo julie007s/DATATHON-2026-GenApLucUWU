@@ -1,0 +1,42 @@
+candidates:
+  seasonal_xgb_full:
+    feature_profile: full
+    residual_scale: 1.0
+    cogs_mix_factor: 1.0
+    description: Baseline seasonal-XGB using the full feature profile.
+
+  seasonal_xgb_market_uplift_135:
+    feature_profile: full
+    residual_scale: 1.35
+    cogs_mix_factor: 1.0
+    description: Conservative market-regime uplift applied to the business residual.
+
+  seasonal_xgb_market_uplift_160:
+    feature_profile: full
+    residual_scale: 1.6
+    cogs_mix_factor: 1.0
+    description: Current public-best market-regime uplift candidate applied only to business residual.
+
+  seasonal_xgb_core_business:
+    feature_profile: core_plus_business
+    residual_scale: 1.0
+    cogs_mix_factor: 1.0
+    description: Pruned business-driver feature profile without post-hoc residual uplift.
+
+  seasonal_xgb_core_business_uplift_135:
+    feature_profile: core_plus_business
+    residual_scale: 1.35
+    cogs_mix_factor: 1.0
+    description: Business-driver feature profile with moderate market-regime uplift.
+
+  seasonal_xgb_market_uplift_160_cogs098:
+    feature_profile: full
+    residual_scale: 1.6
+    cogs_mix_factor: 0.98
+    description: Current public-best revenue path with lower COGS ratio mix.
+
+  seasonal_xgb_market_uplift_160_cogs102:
+    feature_profile: full
+    residual_scale: 1.6
+    cogs_mix_factor: 1.02
+    description: Current public-best revenue path with higher COGS ratio mix.

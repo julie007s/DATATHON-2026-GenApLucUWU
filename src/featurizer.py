@@ -619,6 +619,51 @@ def _validate_feature_table(final_df: pd.DataFrame, sales_df: pd.DataFrame | Non
         )
 
 
+def _add_recovery_seasonality_features(final_df: pd.DataFrame) -> pd.DataFrame:
+    """Add deterministic seasonality/recovery priors derived from chart insights."""
+    df = final_df.copy()
+    dt = pd.to_datetime(df["Date"])
+    month = dt.dt.month
+    quarter = dt.dt.quarter
+
+    # Calendar risk windows observed in weekly/monthly diagnostics.
+    df["is_q2_peak"] = month.isin([4, 5, 6]).astype(int)
+    df["is_pre_peak_ramp"] = month.isin([2, 3]).astype(int)
+    df["is_post_peak_decay"] = month.isin([7, 8, 9]).astype(int)
+    df["is_august_cost_risk"] = (month == 8).astype(int)
+    df["is_late_summer_cost_risk"] = month.isin([7, 8, 9]).astype(int)
+    df["is_year_end_pressure"] = month.isin([11, 12]).astype(int)
+    df["is_december_pressure"] = (month == 12).astype(int)
+    df["is_q4"] = (quarter == 4).astype(int)
+    df["month_in_quarter"] = ((month - 1) % 3) + 1
+
+    # Month-level priors from historical diagnostics: Q2 demand concentration and cost-risk months.
+    margin_risk_score = {
+        1: 0.2, 2: 0.1, 3: 0.2, 4: 0.3, 5: 0.1, 6: 0.3,
+        7: 0.8, 8: 1.0, 9: 0.8, 10: 0.4, 11: 0.7, 12: 1.0,
+    }
+    pre_pandemic_revenue_share = {
+        1: 0.0504, 2: 0.0602, 3: 0.0927, 4: 0.1256, 5: 0.1328, 6: 0.1264,
+        7: 0.0924, 8: 0.0887, 9: 0.0700, 10: 0.0644, 11: 0.0488, 12: 0.0478,
+    }
+    df["margin_risk_month_score"] = month.map(margin_risk_score).astype(float)
+    df["pre_pandemic_month_revenue_share"] = month.map(pre_pandemic_revenue_share).astype(float)
+
+    months_since_recovery = (dt.dt.year - 2022) * 12 + month
+    df["recovery_trend_index"] = months_since_recovery.clip(lower=0).astype(int)
+    df["is_recovery_regime"] = (dt.dt.year >= 2022).astype(int)
+    df["recovery_x_q2_peak"] = df["is_recovery_regime"] * df["is_q2_peak"]
+    df["recovery_x_year_end_pressure"] = df["is_recovery_regime"] * df["is_year_end_pressure"]
+    df["recovery_x_august_cost_risk"] = df["is_recovery_regime"] * df["is_august_cost_risk"]
+
+    if {"Revenue", "COGS"}.issubset(df.columns):
+        df["cogs_to_revenue_ratio"] = (
+            df["COGS"] / df["Revenue"].replace(0, np.nan)
+        ).replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    return df
+
+
 def _generate_lag_features(final_df: pd.DataFrame) -> pd.DataFrame:
     lag_source_cols = [
         c for c in final_df.columns
@@ -739,6 +784,10 @@ def run_featurization(
     if verbose:
         logger.info("  Adding deterministic market regime features (market_era, covid_intensity, sample_weight)...")
     final_df = add_market_era_features(final_df, date_col="Date")
+
+    if verbose:
+        logger.info("  Adding recovery-aware seasonality features...")
+    final_df = _add_recovery_seasonality_features(final_df)
 
     if verbose:
         logger.info("  Generating lag features (seasonal & multi-resolution, lag-safe)...")

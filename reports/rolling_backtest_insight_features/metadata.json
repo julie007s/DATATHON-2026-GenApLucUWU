@@ -1,0 +1,21 @@
+{
+  "feature_table": "data\\output\\featured_table.parquet",
+  "config": "config\\model_candidates.yaml",
+  "folds": [
+    {
+      "fold": "recovery_2021",
+      "holdout_start": "2021-01-01",
+      "holdout_end": "2021-12-31"
+    },
+    {
+      "fold": "recovery_2022",
+      "holdout_start": "2022-01-01",
+      "holdout_end": "2022-12-31"
+    },
+    {
+      "fold": "recovery_2022_h2",
+      "holdout_start": "2022-07-01",
+      "holdout_end": "2022-12-31"
+    }
+  ]
+}

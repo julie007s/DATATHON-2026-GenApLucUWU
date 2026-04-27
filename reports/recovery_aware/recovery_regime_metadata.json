@@ -1,0 +1,88 @@
+{
+  "pre_period": "2012-2018",
+  "shock_period": "2019-2022",
+  "pre_revenue_mean_start": 4096672.640994475,
+  "pre_revenue_mean_end": 5068828.64679452,
+  "pre_cagr_daily_mean": 0.036126364914277564,
+  "shock_revenue_mean": 3014534.980039917,
+  "pandemic_gap_ratio_vs_2018": 0.40527976183486086,
+  "yearly_table": [
+    {
+      "year": 2012,
+      "revenue_mean": 4096672.640994475,
+      "revenue_sum": 741497748.02,
+      "cogs_mean": 3245645.9879005523,
+      "cogs_sum": 587461923.81
+    },
+    {
+      "year": 2013,
+      "revenue_mean": 4540190.18430137,
+      "revenue_sum": 1657169417.27,
+      "cogs_mean": 4016383.844383562,
+      "cogs_sum": 1465980103.2
+    },
+    {
+      "year": 2014,
+      "revenue_mean": 5128344.884383561,
+      "revenue_sum": 1871845882.8,
+      "cogs_mean": 4313993.032575343,
+      "cogs_sum": 1574607456.89
+    },
+    {
+      "year": 2015,
+      "revenue_mean": 5177900.895671234,
+      "revenue_sum": 1889933826.92,
+      "cogs_mean": 4562854.29430137,
+      "cogs_sum": 1665441817.42
+    },
+    {
+      "year": 2016,
+      "revenue_mean": 5750384.364863388,
+      "revenue_sum": 2104640677.54,
+      "cogs_mean": 4864916.373469946,
+      "cogs_sum": 1780559392.69
+    },
+    {
+      "year": 2017,
+      "revenue_mean": 5236066.644602739,
+      "revenue_sum": 1911164325.28,
+      "cogs_mean": 4642152.859013698,
+      "cogs_sum": 1694385793.54
+    },
+    {
+      "year": 2018,
+      "revenue_mean": 5068828.64679452,
+      "revenue_sum": 1850122456.08,
+      "cogs_mean": 4225139.085315069,
+      "cogs_sum": 1542175766.14
+    },
+    {
+      "year": 2019,
+      "revenue_mean": 3114524.497287671,
+      "revenue_sum": 1136801441.51,
+      "cogs_mean": 2753980.503342466,
+      "cogs_sum": 1005202883.72
+    },
+    {
+      "year": 2020,
+      "revenue_mean": 2881180.7617213116,
+      "revenue_sum": 1054512158.79,
+      "cogs_mean": 2420997.5345081966,
+      "cogs_sum": 886085097.63
+    },
+    {
+      "year": 2021,
+      "revenue_mean": 2857643.3414520547,
+      "revenue_sum": 1043039819.63,
+      "cogs_mean": 2578438.6853698627,
+      "cogs_sum": 941130120.16
+    },
+    {
+      "year": 2022,
+      "revenue_mean": 3204791.3196986304,
+      "revenue_sum": 1169748831.69,
+      "cogs_mean": 2795671.682109589,
+      "cogs_sum": 1020420163.97
+    }
+  ]
+}

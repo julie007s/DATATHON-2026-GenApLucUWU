@@ -41,8 +41,8 @@ from src.validator_new import validate_files
 from src.cleaner_new   import clean_multiple_files
 from src.encoder       import run_encoding
 from src.featurizer    import run_featurization
-from src.trainer       import train_revenue_model
-from src.predictor     import generate_submission
+from src.feature_contract import SUPPORTED_FEATURE_PROFILES, persist_active_feature_profile
+from src.model_router  import SUPPORTED_MODEL_ARCHITECTURES, generate_submission_for_architecture, train_model_architecture
 
 # --- ORIGINAL VERSION (Hardcoded) ---
 # from src.validator import validate_files
@@ -81,6 +81,8 @@ def run_pipeline(
     train: bool = False,
     predict: bool = False,
     train_until: str = None,
+    model_arch: str = "arima_hybrid",
+    feature_profile: str = "full",
 ) -> None:
     """
     Main orchestrator for the data pipeline.
@@ -89,9 +91,12 @@ def run_pipeline(
         raw_dir       : Absolute path to the directory containing raw CSV files.
         validate_only : If True, skip cleaning and merging steps.
     """
+    persist_active_feature_profile(feature_profile)
     logger.info(f"\n{'█' * 60}")
     logger.info("  DATA PIPELINE — VALIDATE · CLEAN · MERGE · FEATURE · TRAIN")
     logger.info(f"  📁 Source directory: {raw_dir}")
+    logger.info(f"  🧠 Model architecture: {model_arch}")
+    logger.info(f"  🧩 Feature profile: {feature_profile}")
     logger.info(f"{'█' * 60}")
 
     # ── STEP 1: Collect existing CSV paths ────────────────────
@@ -185,7 +190,8 @@ def run_pipeline(
         logger.info("  STAGE 4: MODEL TRAINING")
         logger.info(f"{'═' * 60}{Style.RESET_ALL}")
         
-        train_revenue_model(
+        train_model_architecture(
+            model_arch=model_arch,
             feature_table_path=output_dir / "featured_table.parquet",
             model_output_dir=raw_dir.parent.parent / "models",
             report_output_dir=raw_dir.parent.parent / "reports",
@@ -199,7 +205,8 @@ def run_pipeline(
         logger.info("  STAGE 5: PREDICTION")
         logger.info(f"{'═' * 60}{Style.RESET_ALL}")
         
-        generate_submission(
+        generate_submission_for_architecture(
+            model_arch=model_arch,
             model_path=raw_dir.parent.parent / "models/xgboost_revenue_model.joblib",
             feature_table_path=output_dir / "featured_table.parquet",
             sample_submission_path=raw_dir / "sample_submission.csv",
@@ -220,49 +227,56 @@ def run_pipeline(
 def _parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Data Pipeline — Validate, Clean, and Merge CSV files",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python pipeline.py
-  python pipeline.py --data_dir data/raw
-  python pipeline.py --validate_only
-        """,
+        description="Run the full data pipeline (validate, clean, merge, feature, train, predict)."
     )
     parser.add_argument(
         "--data_dir",
         type=str,
         default="data/raw",
-        help="Path to the directory containing raw CSV files (default: data/raw)",
+        help="Path to folder containing raw CSV files (default: data/raw)",
     )
     parser.add_argument(
         "--validate_only",
         action="store_true",
-        help="Run validation only — skip null cleaning and table merging",
+        help="Only run validation, then exit.",
     )
     parser.add_argument(
         "--train",
         action="store_true",
-        help="Trigger XGBoost model training",
+        help="Train the model after feature engineering.",
     )
     parser.add_argument(
         "--predict",
         action="store_true",
-        help="Generate submission.csv based on trained model",
+        help="Generate submission predictions after training/loading model.",
     )
     parser.add_argument(
         "--train_until",
         type=str,
         default=None,
-        help="Date string (YYYY-MM-DD) to split training and holdout sets. e.g. '2022-01-01'",
+        help="Optional cutoff date for holdout diagnostics, e.g. 2021-07-01.",
+    )
+    parser.add_argument(
+        "--model_arch",
+        type=str,
+        default="arima_hybrid",
+        choices=SUPPORTED_MODEL_ARCHITECTURES,
+        help="Forecasting model architecture to train/predict.",
+    )
+    parser.add_argument(
+        "--feature_profile",
+        type=str,
+        default="full",
+        choices=SUPPORTED_FEATURE_PROFILES,
+        help="Feature subset profile to use for model training/prediction.",
     )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    args    = _parse_args()
+    args = _parse_args()
     project_root = Path(__file__).parent
-    raw_dir      = (project_root / args.data_dir).resolve()
+    raw_dir = (project_root / args.data_dir).resolve()
 
     run_pipeline(
         raw_dir=raw_dir,
@@ -270,4 +284,6 @@ if __name__ == "__main__":
         train=args.train,
         predict=args.predict,
         train_until=args.train_until,
+        model_arch=args.model_arch,
+        feature_profile=args.feature_profile,
     )

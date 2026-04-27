@@ -1,0 +1,8 @@
+candidate,feature_profile,residual_scale,cogs_mix_factor,folds,mean_official_mae,std_official_mae,max_official_mae,mean_revenue_mae,mean_cogs_mae,description
+seasonal_xgb_core_business,core_plus_business,1.0,1.0,3,659226.6696854265,73561.74315508736,742830.4582522069,709040.4094788934,609412.9298919596,Pruned business-driver feature profile without post-hoc residual uplift.
+seasonal_xgb_core_business_uplift_135,core_plus_business,1.35,1.0,3,662089.6033598637,70268.20655564772,741819.6609562698,716586.5481967259,607592.6585230017,Business-driver feature profile with moderate market-regime uplift.
+seasonal_xgb_full,full,1.0,1.0,3,683880.5488794245,85406.74857011416,779923.1201889087,726479.0379641285,641282.0597947201,Baseline seasonal-XGB using the full feature profile.
+seasonal_xgb_market_uplift_160_cogs102,full,1.6,1.02,3,684161.8659747149,95066.72161301202,792197.9246833979,733692.6530457303,634631.0789036993,Current public-best revenue path with higher COGS ratio mix.
+seasonal_xgb_market_uplift_135,full,1.35,1.0,3,686687.5606328746,92434.47125037192,791580.6432325712,729937.5005799099,643437.6206858394,Conservative market-regime uplift applied to the business residual.
+seasonal_xgb_market_uplift_160,full,1.6,1.0,3,689842.0455434965,97702.82442965242,801144.3502564281,733692.6530457303,645991.4380412627,Current public-best market-regime uplift candidate applied only to business residual.
+seasonal_xgb_market_uplift_160_cogs098,full,1.6,0.98,3,696910.393411379,100065.87073049675,811157.9313461301,733692.6530457303,660128.1337770276,Current public-best revenue path with lower COGS ratio mix.

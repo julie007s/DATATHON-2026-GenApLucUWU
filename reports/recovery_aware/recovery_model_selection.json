@@ -1,0 +1,14 @@
+{
+  "selected_candidate": "recovery_curve_base",
+  "selected_submission": "submission_recovery_selected.csv",
+  "selection_reason": "Default selection uses the base recovery curve because it directly represents gradual 2023-2024 demand recovery, keeps the validated core-business shape, and avoids relying on public leaderboard-derived multipliers.",
+  "regime": {
+    "pre_period": "2012-2018",
+    "shock_period": "2019-2022",
+    "pre_revenue_mean_start": 4096672.640994475,
+    "pre_revenue_mean_end": 5068828.64679452,
+    "pre_cagr_daily_mean": 0.036126364914277564,
+    "shock_revenue_mean": 3014534.980039917,
+    "pandemic_gap_ratio_vs_2018": 0.40527976183486086
+  }
+}

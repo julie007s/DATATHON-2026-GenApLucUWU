@@ -1,0 +1,14 @@
+{
+  "feature_table": "D:\\DATATHON\\data\\output\\featured_table.parquet",
+  "rows": 3833,
+  "date_min": "2012-07-04",
+  "date_max": "2022-12-31",
+  "numeric_feature_count": 214,
+  "high_corr_pair_count": 196,
+  "low_importance_or_constant_count": 7,
+  "profiles": {
+    "core_seasonal_slim": 42,
+    "core_plus_business": 111,
+    "no_revenue_like": 102
+  }
+}
