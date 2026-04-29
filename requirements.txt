@@ -5,6 +5,7 @@ pandas>=2.0.0
 numpy>=1.24.0
 PyYAML>=6.0.0
 pyarrow>=12.0.0       # Parquet I/O engine for featured_table.parquet
+psutil>=5.9.0         # System monitoring
 
 # ==========================================
 # Reporting & Logging
@@ -34,3 +35,5 @@ seaborn>=0.12.0
 xgboost>=1.7.0
 scikit-learn>=1.2.0
 joblib>=1.2.0
+optuna>=3.5.0         # Hyperparameter optimization framework
+statsmodels>=0.14.0   # Time series models (ARIMA/SARIMAX)
