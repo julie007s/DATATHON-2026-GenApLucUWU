@@ -86,3 +86,9 @@ htmlcov/
 secrets.toml
 config_local.py
 auth.yaml
+
+# ==========================================
+# Local Reference / Scratch Folders
+# ==========================================
+im_about_to_del/
+knowledge/
