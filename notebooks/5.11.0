@@ -1,3 +1,0 @@
-Requirement already satisfied: plotly in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (6.7.0)
-Requirement already satisfied: narwhals>=1.15.1 in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (from plotly) (2.20.0)
-Requirement already satisfied: packaging in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (from plotly) (26.1)

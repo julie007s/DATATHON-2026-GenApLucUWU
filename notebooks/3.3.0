@@ -1,3 +1,0 @@
-Requirement already satisfied: lightgbm in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (4.6.0)
-Requirement already satisfied: numpy>=1.17.0 in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (from lightgbm) (2.4.4)
-Requirement already satisfied: scipy in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (from lightgbm) (1.17.1)

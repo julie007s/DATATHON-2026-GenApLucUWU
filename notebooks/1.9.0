@@ -1,2 +1,0 @@
-Requirement already satisfied: scipy in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (1.17.1)
-Requirement already satisfied: numpy<2.7,>=1.26.4 in d:\DATATHON-2026-GenApLucUWU\.venv\Lib\site-packages (from scipy) (2.4.4)
