@@ -1,107 +1,231 @@
 # 🏆 VINUNI BUSINESS DATATHON 2026
 ## Revenue and COGS Forecasting Pipeline
 
-> **Role:** Team Lead / Data & Problem Framing Lead  
-> **Language:** Python 3.10+  
-> **Frameworks:** `MLForecast`, `LightGBM`  
-> **Project Status:** Completed (Academic & Competition Experience)
+> Time-series forecasting pipeline for Revenue and COGS prediction using `MLForecast` and `LightGBM`.
 
 ---
 
-## 👥 Our Team
-A journey of sleepless nights, model tuning, and invaluable teamwork among 4 members:
-* **Nguyễn Thị Kim Ngân (Julie)** — *Team Lead / Problem Framing & QA*
-* **Nguyễn Ngọc Nam** — *Data Pipeline & Feature Engineering Lead*
-* **Trương Lê Trung Hiếu** — *ML Modeling & Validation Lead*
-* **Nguyễn Trần Phương Thúy** — *Exploratory Data Analysis (EDA) & Storytelling Lead*
+## 👥 Team
+
+This project was built during the **VinUni Business Datathon 2026** by:
+
+- Nguyễn Thị Kim Ngân (Julie)
+- Nguyễn Ngọc Nam
+- Trương Lê Trung Hiếu
+- Nguyễn Trần Phương Thuý
+
+The repository started out... honestly pretty chaotic 😭.
+
+During the competition, everyone pushed experiments, notebooks, temporary files, and random ideas into the repo as fast as possible just to keep the workflow moving. At one point, one of us even joked that we were simply “throwing trash onto GitHub”.
+
+We did not end up winning a prize, but the experience itself became something much more memorable:
+- learning how real forecasting pipelines break,
+- debugging under pressure,
+- arguing over validation leakage at 2AM,
+- and somehow still having fun together through all of it.
+
+This repository is kept both as:
+- a reproducible forecasting project,
+- and a small memory of that experience.
 
 ---
 
-## 1) Overview & Business Problem
-Developed for the **VinUni Business Datathon 2026**, this project implements a comprehensive time-series forecasting pipeline for two critical financial metrics: **Revenue** and **Cost of Goods Sold (COGS)** to optimize budget planning.
+## 📌 Overview
 
-### Key Data Challenges:
-- **Strong Non-linear Volatility:** Heavily influenced by seasonality (Calendar, Seasonal profiles) and event windows.
-- **Structural Market Shifts:** The COVID-19 period (2019-2022) significantly altered standard consumer behavior.
+This repository contains an end-to-end forecasting workflow for the DATATHON 2026 Revenue and COGS prediction task.
 
----
+The final official workflow is implemented in:
 
-## 2) Core Architecture & Methodology
-The supervised daily time-series forecasting solution is implemented in `notebooks/forecast.ipynb`:
+```text
+notebooks/forecast.ipynb
+```
 
-**Workflow:**
-`[Raw Data (Wide format)]` $\rightarrow$ `[Long format (unique_id, ds, y)]` $\rightarrow$ `[Pipeline]`
-
-### Pipeline Components:
-- **Feature Engineering:**
-    - Lags (7d - 365d)
-    - Rolling Stats (Mean, Min, Max)
-    - Harmonic Fourier (Sine/Cosine)
-    - COVID-regime features
-- **Validation Strategy:**
-    - 548-day Chronological Holdout
-    - Leakage-safe design
-    - Aligned with actual forecasting horizons
-- **Modeling & Blending:**
-    - MLForecast + LightGBM Ensembles
-    - Calibrated Blending via Validation MAE
-    - Non-negative clipping to avoid negative price/cost predictions
+The solution focuses on:
+- leakage-safe time-series forecasting,
+- feature engineering for retail seasonality,
+- LightGBM ensemble modeling,
+- validation-calibrated blending,
+- and SHAP-based explainability.
 
 ---
 
-## 3) Project Structure
+## ⚙️ Main Pipeline
+
+```text
+Raw Data
+   ↓
+Time-series preprocessing
+   ↓
+Feature Engineering
+   ↓
+Chronological Validation
+   ↓
+MLForecast + LightGBM
+   ↓
+Ensemble Blending
+   ↓
+Final Forecast Export
+```
+
+The pipeline performs the following stages:
+
+| Step | Description |
+|---|---|
+| Configuration | Defines paths, forecast horizon, model parameters, and lag settings. |
+| Data Loading | Reads historical sales data and submission templates. |
+| Preprocessing | Converts raw tables into long-format time-series data. |
+| Feature Engineering | Builds lag, rolling, calendar, seasonal, and event-based features. |
+| Validation | Uses a leakage-safe chronological holdout strategy. |
+| Modeling | Trains multiple LightGBM variants inside `MLForecast`. |
+| Blending | Combines models using validation-calibrated ensemble weights. |
+| Explainability | Generates SHAP summary plots for model interpretation. |
+| Export | Produces the final Kaggle-compatible `submission.csv`. |
+
+---
+
+## 🧠 Feature Engineering
+
+The forecasting notebook includes several feature groups:
+
+- Lag features: 7, 14, 30, 90, 180, 354, and 365 days.
+- Rolling statistics: rolling mean, minimum, and maximum over 7-day and 30-day windows.
+- Calendar features: weekday, month, day of month, and day of year.
+- Harmonic week-of-year encodings using sine/cosine transformations.
+- Seasonal retail profile features.
+- Fixed event windows for recurring business periods.
+- COVID-regime indicators for structural disruptions between 2019-2022.
+
+---
+
+## 📊 Validation Metrics
+
+The validation strategy uses a leakage-safe chronological holdout matching the official forecast horizon.
+
+| Target | MAE |
+|---|---:|
+| Revenue | 595,943 |
+| COGS | 498,150 |
+| Average | 547,047 |
+
+MAE was selected because it directly reflects absolute business forecasting error.
+
+---
+
+## 📂 Project Structure
+
 ```text
 DATATHON-2026-GenApLucUWU/
 ├── README.md
 ├── requirements.txt
 ├── data/
-│   ├── output/          # Submission files (submission.csv) and result charts
-│   └── raw/             # Original dataset from organizers
+│   ├── raw/
+│   └── output/
+│       ├── submission.csv
+│       ├── forecast_visualization.png
+│       ├── shap_summary.png
+│       └── shap_summary_cogs.png
 ├── notebooks/
-│   ├── forecast.ipynb   # Main forecasting pipeline (Run All Cells)
-│   ├── answer.ipynb     # Supplementary analysis
-│   └── Thuy.ipynb       # Exploratory Data Analysis (EDA) by Thúy
-├── reports/figures/     # Charts and SHAP summary plots for reporting
-└── knowledge/           # Competition rules, data schema, and risk analysis
+│   ├── forecast.ipynb
+│   ├── answer.ipynb
+│   └── Thuy.ipynb
+├── reports/
+│   └── figures/
+├── knowledge/
+└── im_about_to_del/
 ```
 
----
+Yes, `im_about_to_del/` is exactly what it sounds like.
 
-## 4) Explainability & Insights (XAI)
-To avoid a "black-box" model, **SHAP (SHapley Additive exPlanations)** was used to decompose forecasting drivers.
-- **Insight:** The plot at `data/output/shap_summary.png` demonstrates that forecasts are primarily driven by **Seasonality**, recent **Momentum**, and specific **Retail Events**.
+It contains old experiments, abandoned notebooks, broken ideas, temporary pipelines, and random remnants that somehow survived cleanup after the competition 😭.
 
 ---
 
-## 5) Internal Validation Metrics
-The model is evaluated using **MAE (Mean Absolute Error)** to accurately reflect absolute errors in financial risk management.
+## 🔍 Explainability (XAI)
 
-| Target | Validation MAE |
-| :--- | :--- |
-| 💰 Revenue | 595,943 |
-| 📦 COGS | 498,150 |
-| 📈 **Average** | **547,047** |
+To avoid treating the forecasting system as a pure black-box model, SHAP analysis was used to interpret prediction behavior.
+
+Generated outputs:
+
+```text
+data/output/shap_summary.png
+data/output/shap_summary_cogs.png
+```
+
+The explainability analysis highlights how predictions are influenced by:
+- seasonality,
+- short-term momentum,
+- retail event windows,
+- and structural market regime shifts.
 
 ---
 
-## 6) Environment Setup & Replication
+## 🚀 Environment Setup
 
-### Step 1: Virtual Environment
+### 1. Create a virtual environment
+
 ```powershell
 python -m venv .venv
+```
+
+### 2. Activate the environment
+
+```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-### Step 2: Install Dependencies
+### 3. Install dependencies
+
 ```powershell
 pip install -r requirements.txt
 ```
 
-### Step 3: Reproduce Results
-1. Open `notebooks/forecast.ipynb`.
-2. Select the `.venv` kernel.
-3. Click **Run All Cells**.
-4. The Kaggle-formatted submission file will be exported to `data/output/submission.csv` with columns: `Date`, `Revenue`, `COGS`.
+### 4. Register Jupyter kernel (optional)
+
+```powershell
+python -m ipykernel install --user --name datathon-2026 --display-name "Python (datathon-2026)"
+```
 
 ---
-*This project serves as a significant milestone in our Data Science learning journey at UIT!* 🎓
+
+## ▶️ Reproducing the Forecast
+
+1. Open:
+
+```text
+notebooks/forecast.ipynb
+```
+
+2. Select the correct Python kernel.
+
+3. Run all notebook cells from top to bottom.
+
+Generated outputs:
+
+```text
+data/output/submission.csv
+data/output/forecast_visualization.png
+data/output/shap_summary.png
+data/output/shap_summary_cogs.png
+```
+
+Final submission file:
+
+```text
+data/output/submission.csv
+```
+
+Expected columns:
+
+```text
+Date, Revenue, COGS
+```
+
+---
+
+## ✨ Final Note
+
+This project may not be the cleanest repository ever created.
+
+But it represents months of experimentation, debugging, feature engineering, model tuning, failed ideas, rushed commits, and teamwork under pressure.
+
+And honestly, that probably matters more than the leaderboard.
