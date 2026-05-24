@@ -9,10 +9,10 @@
 
 This project was built during the **VinUni Business Datathon 2026** by:
 
-- Nguyễn Thị Kim Ngân (Julie)
-- Nguyễn Ngọc Nam
-- Trương Lê Trung Hiếu
-- Nguyễn Trần Phương Thuý
+- Nguyễn Thị Kim Ngân (Julie) — *Team Lead / Exploratory Data Analysis (EDA), Quality Assurance & Storytelling Lead*
+- Nguyễn Ngọc Nam — *Data Pipeline & Feature Engineering Lead*
+- Trương Lê Trung Hiếu — *ML Modeling & Validation Lead*
+- Nguyễn Trần Phương Thuý — *Problem Framing Lead, Exploratory Data Analysis (EDA) & Quality Assurance**
 
 The repository started out... honestly pretty chaotic 😭.
 
