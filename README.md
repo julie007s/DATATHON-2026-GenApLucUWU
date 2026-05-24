@@ -1,206 +1,107 @@
-# DATATHON 2026 - Revenue and COGS Forecasting Pipeline
+# 🏆 VINUNI BUSINESS DATATHON 2026
+## Revenue and COGS Forecasting Pipeline
 
-> Role: Data Engineer / ML Engineer  
-> Language: Python 3.10+  
-> Last updated: 2026-05-01
-
----
-
-## 1) Overview
-
-This repository contains an end-to-end forecasting workflow for the DATATHON 2026 Revenue and COGS prediction task. The current official forecasting workflow is implemented in `notebooks/forecast.ipynb` and produces the final submission file in `data/output/submission.csv`.
-
-The solution focuses on:
-
-1. Time-series preprocessing for daily Revenue and COGS.
-2. Leakage-safe chronological validation.
-3. Calendar, lag, rolling, event-window, seasonal-profile, and COVID-regime features.
-4. LightGBM models inside an `MLForecast` framework.
-5. Validation-calibrated blending across model variants.
-6. Forecast visualization and SHAP explainability.
-7. Export of the final Kaggle-compatible submission.
+> **Role:** Team Lead / Data & Problem Framing Lead  
+> **Language:** Python 3.10+  
+> **Frameworks:** `MLForecast`, `LightGBM`  
+> **Project Status:** Completed (Academic & Competition Experience)
 
 ---
 
-## 2) Main Forecasting Workflow
+## 👥 Our Team
+A journey of sleepless nights, model tuning, and invaluable teamwork among 4 members:
+* **Nguyễn Thị Kim Ngân (Julie)** — *Team Lead / Problem Framing & QA*
+* **Nguyễn Ngọc Nam** — *Data Pipeline & Feature Engineering Lead*
+* **Trương Lê Trung Hiếu** — *ML Modeling & Validation Lead*
+* **Nguyễn Trần Phương Thúy** — *Exploratory Data Analysis (EDA) & Storytelling Lead*
 
-The main workflow is:
+---
 
-```text
-notebooks/forecast.ipynb
-```
+## 1) Overview & Business Problem
+Developed for the **VinUni Business Datathon 2026**, this project implements a comprehensive time-series forecasting pipeline for two critical financial metrics: **Revenue** and **Cost of Goods Sold (COGS)** to optimize budget planning.
 
-It performs the following steps:
+### Key Data Challenges:
+- **Strong Non-linear Volatility:** Heavily influenced by seasonality (Calendar, Seasonal profiles) and event windows.
+- **Structural Market Shifts:** The COVID-19 period (2019-2022) significantly altered standard consumer behavior.
 
-| Step | Description |
-|---|---|
-| Configuration | Defines paths, forecast horizon, model parameters, lags, and output settings. |
-| Data loading | Reads the historical sales data and submission template. |
-| Preprocessing | Converts the data into long format with `unique_id`, `ds`, and `y`. |
-| Feature engineering | Builds lag, rolling, calendar, seasonal-profile, event-window, and COVID-regime features. |
-| Validation | Uses a 548-day chronological holdout to match the official test horizon. |
-| Modeling | Trains multiple LightGBM variants with `MLForecast`. |
-| Blending | Calibrates target-specific ensemble weights using validation MAE. |
-| Final forecast | Refits on all available history and forecasts the 2023-01-01 to 2024-07-01 horizon. |
-| Explainability | Generates SHAP summary plots for Revenue and COGS. |
-| Export | Writes the final `submission.csv` and supporting figures to `data/output/`. |
+---
+
+## 2) Core Architecture & Methodology
+The supervised daily time-series forecasting solution is implemented in `notebooks/forecast.ipynb`:
+
+**Workflow:**
+`[Raw Data (Wide format)]` $\rightarrow$ `[Long format (unique_id, ds, y)]` $\rightarrow$ `[Pipeline]`
+
+### Pipeline Components:
+- **Feature Engineering:**
+    - Lags (7d - 365d)
+    - Rolling Stats (Mean, Min, Max)
+    - Harmonic Fourier (Sine/Cosine)
+    - COVID-regime features
+- **Validation Strategy:**
+    - 548-day Chronological Holdout
+    - Leakage-safe design
+    - Aligned with actual forecasting horizons
+- **Modeling & Blending:**
+    - MLForecast + LightGBM Ensembles
+    - Calibrated Blending via Validation MAE
+    - Non-negative clipping to avoid negative price/cost predictions
 
 ---
 
 ## 3) Project Structure
-
 ```text
 DATATHON-2026-GenApLucUWU/
-|-- README.md
-|-- requirements.txt
-|
-|-- data/
-|   |-- output/
-|   |   |-- submission.csv
-|   |   |-- forecast_visualization.png
-|   |   |-- shap_summary.png
-|   |   |-- shap_summary_cogs.png
-|   |
-|   |-- raw/
-|
-|-- notebooks/
-|   |-- forecast.ipynb
-|   |-- answer.ipynb
-|   |-- Thuy.ipynb
-|
-|-- reports/
-|   |-- figures/
-|
-|-- im_about_to_del/
-|   |-- legacy pipeline, notebooks, configs, and source modules kept for reference
-|
-|-- knowledge/
-|   |-- competition notes, schema notes, warnings, and analysis references
+├── README.md
+├── requirements.txt
+├── data/
+│   ├── output/          # Submission files (submission.csv) and result charts
+│   └── raw/             # Original dataset from organizers
+├── notebooks/
+│   ├── forecast.ipynb   # Main forecasting pipeline (Run All Cells)
+│   ├── answer.ipynb     # Supplementary analysis
+│   └── Thuy.ipynb       # Exploratory Data Analysis (EDA) by Thúy
+├── reports/figures/     # Charts and SHAP summary plots for reporting
+└── knowledge/           # Competition rules, data schema, and risk analysis
 ```
-
-The official forecast output is generated by `notebooks/forecast.ipynb`. The `im_about_to_del/` directory contains legacy or exploratory pipeline assets that are not required for the final notebook-based submission.
 
 ---
 
-## 4) Environment Setup
+## 4) Explainability & Insights (XAI)
+To avoid a "black-box" model, **SHAP (SHapley Additive exPlanations)** was used to decompose forecasting drivers.
+- **Insight:** The plot at `data/output/shap_summary.png` demonstrates that forecasts are primarily driven by **Seasonality**, recent **Momentum**, and specific **Retail Events**.
 
-### Step 1 - Create a virtual environment
+---
 
+## 5) Internal Validation Metrics
+The model is evaluated using **MAE (Mean Absolute Error)** to accurately reflect absolute errors in financial risk management.
+
+| Target | Validation MAE |
+| :--- | :--- |
+| 💰 Revenue | 595,943 |
+| 📦 COGS | 498,150 |
+| 📈 **Average** | **547,047** |
+
+---
+
+## 6) Environment Setup & Replication
+
+### Step 1: Virtual Environment
 ```powershell
 python -m venv .venv
-```
-
-### Step 2 - Activate the environment on Windows PowerShell
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 .\.venv\Scripts\Activate.ps1
 ```
 
-### Step 3 - Install dependencies
-
+### Step 2: Install Dependencies
 ```powershell
 pip install -r requirements.txt
 ```
 
-### Step 4 - Register the Jupyter kernel, if needed
-
-```powershell
-python -m ipykernel install --user --name datathon-2026 --display-name "Python (datathon-2026)"
-```
-
----
-
-## 5) How to Reproduce the Final Forecast
-
+### Step 3: Reproduce Results
 1. Open `notebooks/forecast.ipynb`.
-2. Select the project Python kernel.
-3. Run all cells from top to bottom.
-4. Check the generated files in `data/output/`.
-
-Expected main outputs:
-
-```text
-data/output/submission.csv
-data/output/forecast_visualization.png
-data/output/shap_summary.png
-data/output/shap_summary_cogs.png
-```
-
-The file to submit is:
-
-```text
-data/output/submission.csv
-```
-
-It must contain exactly these columns:
-
-```text
-Date, Revenue, COGS
-```
+2. Select the `.venv` kernel.
+3. Click **Run All Cells**.
+4. The Kaggle-formatted submission file will be exported to `data/output/submission.csv` with columns: `Date`, `Revenue`, `COGS`.
 
 ---
-
-## 6) Modeling Summary
-
-The task is treated as a supervised daily time-series forecasting problem for two targets: `Revenue` and `COGS`. The original wide-format sales table is transformed into long format so that both targets can be modeled consistently in `MLForecast`.
-
-To prevent temporal leakage, the final model design uses a chronological validation split. The last 548 historical days are used as an internal validation horizon, matching the length of the official hidden test period. Seasonal profiles and validation features are constructed only from information available before the prediction dates.
-
-The model uses a LightGBM ensemble with multiple bias-variance profiles. The predictions are combined through validation-calibrated blending, separately for `Revenue` and `COGS`. Final predictions are clipped to non-negative values and rounded to two decimals before export.
-
----
-
-## 7) Feature Engineering
-
-The forecasting notebook includes the following feature groups:
-
-- Lag features: 7, 14, 30, 90, 180, 354, and 365 days.
-- Rolling statistics: rolling mean, maximum, and minimum over 7-day and 30-day windows.
-- Calendar features: weekday, month, day of month, day of year, and related deterministic date features.
-- Harmonic week-of-year encodings using sine and cosine transformations.
-- Week-of-year seasonal profiles for peak timing and peak magnitude estimation.
-- Fixed Gregorian event windows for recurring retail periods.
-- COVID-regime features for structural market disruption during 2019-2022.
-
----
-
-## 8) Validation and Metrics
-
-The notebook reports internal validation metrics on the 548-day chronological holdout. The key metric is MAE because it maps directly to average absolute business planning error.
-
-Current validation MAE values used in the technical report:
-
-| Target | MAE |
-|---|---:|
-| Revenue | 595,943 |
-| COGS | 498,150 |
-| Average | 547,047 |
-
----
-
-## 9) Explainability Outputs
-
-The notebook generates SHAP plots to explain the LightGBM models:
-
-| File | Meaning |
-|---|---|
-| `data/output/shap_summary.png` | SHAP summary plot for the Revenue model. |
-| `data/output/shap_summary_cogs.png` | SHAP summary plot for the COGS model. |
-
-These plots help interpret whether the forecast is driven by seasonality, recent momentum, retail event windows, or regime effects.
-
----
-
-## 10) Important Output Files
-
-After running `notebooks/forecast.ipynb`, the important files are:
-
-```text
-data/output/submission.csv
-data/output/forecast_visualization.png
-data/output/shap_summary.png
-data/output/shap_summary_cogs.png
-```
-
-The old experimental submissions and obsolete report figures were removed from the active output folder to keep the repository clean.
+*This project serves as a significant milestone in our Data Science learning journey at UIT!* 🎓
